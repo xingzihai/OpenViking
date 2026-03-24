@@ -160,7 +160,10 @@ class SchemaModelGenerator:
             ),
             overview=(
                 Optional[Union[str, StrPatch]],
-                Field(None, description="Overview content (L1), supports direct string or patch format"),
+                Field(
+                    None,
+                    description="Overview content (L1). Use Markdown with internal links: [filename](filename.md), e.g., [python](python.md), [go](go.md). Supports direct string or patch format.",
+                ),
             ),
         )
 
