@@ -2,12 +2,15 @@
 # SPDX-License-Identifier: Apache-2.0
 """OpenAI VLM backend implementation"""
 
-import asyncio
 import base64
 import logging
 import time
 from pathlib import Path
 from typing import Any, Dict, List, Union
+
+import openai
+
+from openviking.utils.model_retry import retry_async, retry_sync
 
 from ..base import VLMBase
 from ..registry import DEFAULT_AZURE_API_VERSION
@@ -50,13 +53,12 @@ class OpenAIVLM(VLMBase):
     def get_client(self):
         """Get sync client"""
         if self._sync_client is None:
-            try:
-                import openai
-            except ImportError:
-                raise ImportError("Please install openai: pip install openai")
             kwargs = _build_openai_client_kwargs(
-                self.provider, self.api_key, self.api_base,
-                self.api_version, self.extra_headers,
+                self.provider,
+                self.api_key,
+                self.api_base,
+                self.api_version,
+                self.extra_headers,
             )
             if self.provider == "azure":
                 self._sync_client = openai.AzureOpenAI(**kwargs)
@@ -67,13 +69,12 @@ class OpenAIVLM(VLMBase):
     def get_async_client(self):
         """Get async client"""
         if self._async_client is None:
-            try:
-                import openai
-            except ImportError:
-                raise ImportError("Please install openai: pip install openai")
             kwargs = _build_openai_client_kwargs(
-                self.provider, self.api_key, self.api_base,
-                self.api_version, self.extra_headers,
+                self.provider,
+                self.api_key,
+                self.api_base,
+                self.api_version,
+                self.extra_headers,
             )
             if self.provider == "azure":
                 self._async_client = openai.AsyncAzureOpenAI(**kwargs)
@@ -82,7 +83,9 @@ class OpenAIVLM(VLMBase):
         return self._async_client
 
     def _update_token_usage_from_response(
-        self, response, duration_seconds: float = 0.0,
+        self,
+        response,
+        duration_seconds: float = 0.0,
     ):
         if hasattr(response, "usage") and response.usage:
             prompt_tokens = response.usage.prompt_tokens
@@ -183,9 +186,7 @@ class OpenAIVLM(VLMBase):
 
         return "".join(content_parts)
 
-    def get_completion(self, prompt: str, thinking: bool = False) -> str:
-        """Get text completion"""
-        client = self.get_client()
+    def _build_text_kwargs(self, prompt: str) -> Dict[str, Any]:
         kwargs = {
             "model": self.model or "gpt-4o-mini",
             "messages": [{"role": "user", "content": prompt}],
@@ -194,58 +195,77 @@ class OpenAIVLM(VLMBase):
         }
         if self.max_tokens is not None:
             kwargs["max_tokens"] = self.max_tokens
+        return kwargs
 
-        t0 = time.perf_counter()
-        response = client.chat.completions.create(**kwargs)
-        elapsed = time.perf_counter() - t0
+    def _build_vision_kwargs(
+        self,
+        prompt: str,
+        images: List[Union[str, Path, bytes]],
+    ) -> Dict[str, Any]:
+        content = [self._prepare_image(img) for img in images]
+        content.append({"type": "text", "text": prompt})
 
+        kwargs = {
+            "model": self.model or "gpt-4o-mini",
+            "messages": [{"role": "user", "content": content}],
+            "temperature": self.temperature,
+            "stream": self.stream,
+        }
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
+        return kwargs
+
+    def _extract_completion_content(self, response, elapsed: float) -> str:
         if self.stream:
             content = self._process_streaming_response(response)
         else:
             self._update_token_usage_from_response(response, duration_seconds=elapsed)
             content = self._extract_content_from_response(response)
-
         return self._clean_response(content)
 
-    async def get_completion_async(
-        self, prompt: str, thinking: bool = False, max_retries: int = 0
-    ) -> str:
+    async def _extract_completion_content_async(self, response, elapsed: float) -> str:
+        if self.stream:
+            content = await self._process_streaming_response_async(response)
+        else:
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            content = self._extract_content_from_response(response)
+        return self._clean_response(content)
+
+    def get_completion(self, prompt: str, thinking: bool = False) -> str:
+        """Get text completion"""
+        client = self.get_client()
+        kwargs = self._build_text_kwargs(prompt)
+
+        def _call() -> str:
+            t0 = time.perf_counter()
+            response = client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            return self._extract_completion_content(response, elapsed)
+
+        return retry_sync(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="OpenAI VLM completion",
+        )
+
+    async def get_completion_async(self, prompt: str, thinking: bool = False) -> str:
         """Get text completion asynchronously"""
         client = self.get_async_client()
-        kwargs = {
-            "model": self.model or "gpt-4o-mini",
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": self.temperature,
-            "stream": self.stream,
-        }
-        if self.max_tokens is not None:
-            kwargs["max_tokens"] = self.max_tokens
+        kwargs = self._build_text_kwargs(prompt)
 
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                t0 = time.perf_counter()
-                response = await client.chat.completions.create(**kwargs)
-                elapsed = time.perf_counter() - t0
+        async def _call() -> str:
+            t0 = time.perf_counter()
+            response = await client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            return await self._extract_completion_content_async(response, elapsed)
 
-                if self.stream:
-                    content = await self._process_streaming_response_async(response)
-                else:
-                    self._update_token_usage_from_response(
-                        response, duration_seconds=elapsed,
-                    )
-                    content = self._extract_content_from_response(response)
-
-                return self._clean_response(content)
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    await asyncio.sleep(2**attempt)
-
-        if last_error:
-            raise last_error
-        else:
-            raise RuntimeError("Unknown error in async completion")
+        return await retry_async(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="OpenAI VLM async completion",
+        )
 
     def _detect_image_format(self, data: bytes) -> str:
         """Detect image format from magic bytes.
@@ -307,32 +327,20 @@ class OpenAIVLM(VLMBase):
     ) -> str:
         """Get vision completion"""
         client = self.get_client()
+        kwargs = self._build_vision_kwargs(prompt, images)
 
-        content = []
-        for img in images:
-            content.append(self._prepare_image(img))
-        content.append({"type": "text", "text": prompt})
+        def _call() -> str:
+            t0 = time.perf_counter()
+            response = client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            return self._extract_completion_content(response, elapsed)
 
-        kwargs = {
-            "model": self.model or "gpt-4o-mini",
-            "messages": [{"role": "user", "content": content}],
-            "temperature": self.temperature,
-            "stream": self.stream,
-        }
-        if self.max_tokens is not None:
-            kwargs["max_tokens"] = self.max_tokens
-
-        t0 = time.perf_counter()
-        response = client.chat.completions.create(**kwargs)
-        elapsed = time.perf_counter() - t0
-
-        if self.stream:
-            content = self._process_streaming_response(response)
-        else:
-            self._update_token_usage_from_response(response, duration_seconds=elapsed)
-            content = self._extract_content_from_response(response)
-
-        return self._clean_response(content)
+        return retry_sync(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="OpenAI VLM vision completion",
+        )
 
     async def get_vision_completion_async(
         self,
@@ -342,29 +350,17 @@ class OpenAIVLM(VLMBase):
     ) -> str:
         """Get vision completion asynchronously"""
         client = self.get_async_client()
+        kwargs = self._build_vision_kwargs(prompt, images)
 
-        content = []
-        for img in images:
-            content.append(self._prepare_image(img))
-        content.append({"type": "text", "text": prompt})
+        async def _call() -> str:
+            t0 = time.perf_counter()
+            response = await client.chat.completions.create(**kwargs)
+            elapsed = time.perf_counter() - t0
+            return await self._extract_completion_content_async(response, elapsed)
 
-        kwargs = {
-            "model": self.model or "gpt-4o-mini",
-            "messages": [{"role": "user", "content": content}],
-            "temperature": self.temperature,
-            "stream": self.stream,
-        }
-        if self.max_tokens is not None:
-            kwargs["max_tokens"] = self.max_tokens
-
-        t0 = time.perf_counter()
-        response = await client.chat.completions.create(**kwargs)
-        elapsed = time.perf_counter() - t0
-
-        if self.stream:
-            content = await self._process_streaming_response_async(response)
-        else:
-            self._update_token_usage_from_response(response, duration_seconds=elapsed)
-            content = self._extract_content_from_response(response)
-
-        return self._clean_response(content)
+        return await retry_async(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="OpenAI VLM async vision completion",
+        )

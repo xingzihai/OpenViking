@@ -24,7 +24,7 @@ class VLMBase(ABC):
         self.api_key = config.get("api_key")
         self.api_base = config.get("api_base")
         self.temperature = config.get("temperature", 0.0)
-        self.max_retries = config.get("max_retries", 2)
+        self.max_retries = config.get("max_retries", 3)
         self.max_tokens = config.get("max_tokens")
         self.extra_headers = config.get("extra_headers")
         self.stream = config.get("stream", False)
@@ -38,9 +38,7 @@ class VLMBase(ABC):
         pass
 
     @abstractmethod
-    async def get_completion_async(
-        self, prompt: str, thinking: bool = False, max_retries: int = 0
-    ) -> str:
+    async def get_completion_async(self, prompt: str, thinking: bool = False) -> str:
         """Get text completion asynchronously"""
         pass
 
@@ -74,7 +72,11 @@ class VLMBase(ABC):
 
     # Token usage tracking methods
     def update_token_usage(
-        self, model_name: str, provider: str, prompt_tokens: int, completion_tokens: int,
+        self,
+        model_name: str,
+        provider: str,
+        prompt_tokens: int,
+        completion_tokens: int,
         duration_seconds: float = 0.0,
     ) -> None:
         """Update token usage
@@ -141,6 +143,7 @@ class VLMBase(ABC):
         if isinstance(response, str):
             return response
         return response.choices[0].message.content or ""
+
 
 class VLMFactory:
     """VLM factory class, creates corresponding VLM instance based on config"""

@@ -18,9 +18,7 @@ class TestVLMBaseResponseFormats:
         def get_completion(self, prompt: str, thinking: bool = False) -> str:
             pass
 
-        async def get_completion_async(
-            self, prompt: str, thinking: bool = False, max_retries: int = 0
-        ) -> str:
+        async def get_completion_async(self, prompt: str, thinking: bool = False) -> str:
             pass
 
         def get_vision_completion(
@@ -50,14 +48,12 @@ class TestVLMBaseResponseFormats:
         )
 
     def test_extract_content_from_str_response(self, vlm):
-        assert vlm._extract_content_from_response("plain string response") == "plain string response"
+        assert (
+            vlm._extract_content_from_response("plain string response") == "plain string response"
+        )
 
     def test_extract_content_from_standard_openai_response(self, vlm):
         response = SimpleNamespace(
-            choices=[
-                SimpleNamespace(
-                    message=SimpleNamespace(content="standard response content")
-                )
-            ]
+            choices=[SimpleNamespace(message=SimpleNamespace(content="standard response content"))]
         )
         assert vlm._extract_content_from_response(response) == "standard response content"

@@ -7,7 +7,6 @@ import os
 
 os.environ["LITELLM_LOCAL_MODEL_COST_MAP"] = "True"
 
-import asyncio
 import base64
 import time
 from pathlib import Path
@@ -15,6 +14,8 @@ from typing import Any, Dict, List, Union
 
 import litellm
 from litellm import acompletion, completion
+
+from openviking.utils.model_retry import retry_async, retry_sync
 
 from ..base import VLMBase
 
@@ -221,44 +222,57 @@ class LiteLLMVLMProvider(VLMBase):
 
         return kwargs
 
+    def _build_text_kwargs(self, prompt: str) -> dict[str, Any]:
+        model = self._resolve_model(self.model or "gpt-4o-mini")
+        messages = [{"role": "user", "content": prompt}]
+        return self._build_kwargs(model, messages)
+
+    def _build_vision_kwargs(
+        self,
+        prompt: str,
+        images: List[Union[str, Path, bytes]],
+    ) -> dict[str, Any]:
+        model = self._resolve_model(self.model or "gpt-4o-mini")
+        content = [self._prepare_image(img) for img in images]
+        content.append({"type": "text", "text": prompt})
+        messages = [{"role": "user", "content": content}]
+        return self._build_kwargs(model, messages)
+
     def get_completion(self, prompt: str, thinking: bool = False) -> str:
         """Get text completion synchronously."""
-        model = self._resolve_model(self.model or "gpt-4o-mini")
-        messages = [{"role": "user", "content": prompt}]
-        kwargs = self._build_kwargs(model, messages)
+        kwargs = self._build_text_kwargs(prompt)
 
-        t0 = time.perf_counter()
-        response = completion(**kwargs)
-        elapsed = time.perf_counter() - t0
-        self._update_token_usage_from_response(response, duration_seconds=elapsed)
-        return self._clean_response(self._extract_content_from_response(response))
+        def _call() -> str:
+            t0 = time.perf_counter()
+            response = completion(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            return self._clean_response(self._extract_content_from_response(response))
 
-    async def get_completion_async(
-        self, prompt: str, thinking: bool = False, max_retries: int = 0
-    ) -> str:
+        return retry_sync(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="LiteLLM VLM completion",
+        )
+
+    async def get_completion_async(self, prompt: str, thinking: bool = False) -> str:
         """Get text completion asynchronously."""
-        model = self._resolve_model(self.model or "gpt-4o-mini")
-        messages = [{"role": "user", "content": prompt}]
-        kwargs = self._build_kwargs(model, messages)
+        kwargs = self._build_text_kwargs(prompt)
 
-        last_error = None
-        for attempt in range(max_retries + 1):
-            try:
-                t0 = time.perf_counter()
-                response = await acompletion(**kwargs)
-                elapsed = time.perf_counter() - t0
-                self._update_token_usage_from_response(
-                    response, duration_seconds=elapsed,
-                )
-                return self._clean_response(self._extract_content_from_response(response))
-            except Exception as e:
-                last_error = e
-                if attempt < max_retries:
-                    await asyncio.sleep(2**attempt)
+        async def _call() -> str:
+            t0 = time.perf_counter()
+            response = await acompletion(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            return self._clean_response(self._extract_content_from_response(response))
 
-        if last_error:
-            raise last_error
-        raise RuntimeError("Unknown error in async completion")
+        return await retry_async(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="LiteLLM VLM async completion",
+        )
 
     def get_vision_completion(
         self,
@@ -267,21 +281,21 @@ class LiteLLMVLMProvider(VLMBase):
         thinking: bool = False,
     ) -> str:
         """Get vision completion synchronously."""
-        model = self._resolve_model(self.model or "gpt-4o-mini")
+        kwargs = self._build_vision_kwargs(prompt, images)
 
-        content = []
-        for img in images:
-            content.append(self._prepare_image(img))
-        content.append({"type": "text", "text": prompt})
+        def _call() -> str:
+            t0 = time.perf_counter()
+            response = completion(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            return self._clean_response(self._extract_content_from_response(response))
 
-        messages = [{"role": "user", "content": content}]
-        kwargs = self._build_kwargs(model, messages)
-
-        t0 = time.perf_counter()
-        response = completion(**kwargs)
-        elapsed = time.perf_counter() - t0
-        self._update_token_usage_from_response(response, duration_seconds=elapsed)
-        return self._clean_response(self._extract_content_from_response(response))
+        return retry_sync(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="LiteLLM VLM vision completion",
+        )
 
     async def get_vision_completion_async(
         self,
@@ -290,24 +304,26 @@ class LiteLLMVLMProvider(VLMBase):
         thinking: bool = False,
     ) -> str:
         """Get vision completion asynchronously."""
-        model = self._resolve_model(self.model or "gpt-4o-mini")
+        kwargs = self._build_vision_kwargs(prompt, images)
 
-        content = []
-        for img in images:
-            content.append(self._prepare_image(img))
-        content.append({"type": "text", "text": prompt})
+        async def _call() -> str:
+            t0 = time.perf_counter()
+            response = await acompletion(**kwargs)
+            elapsed = time.perf_counter() - t0
+            self._update_token_usage_from_response(response, duration_seconds=elapsed)
+            return self._clean_response(self._extract_content_from_response(response))
 
-        messages = [{"role": "user", "content": content}]
-        kwargs = self._build_kwargs(model, messages)
-
-        t0 = time.perf_counter()
-        response = await acompletion(**kwargs)
-        elapsed = time.perf_counter() - t0
-        self._update_token_usage_from_response(response, duration_seconds=elapsed)
-        return self._clean_response(self._extract_content_from_response(response))
+        return await retry_async(
+            _call,
+            max_retries=self.max_retries,
+            logger=logger,
+            operation_name="LiteLLM VLM async vision completion",
+        )
 
     def _update_token_usage_from_response(
-        self, response, duration_seconds: float = 0.0,
+        self,
+        response,
+        duration_seconds: float = 0.0,
     ) -> None:
         """Update token usage from response."""
         if hasattr(response, "usage") and response.usage:

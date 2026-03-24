@@ -12,7 +12,7 @@ class VLMConfig(BaseModel):
     api_key: Optional[str] = Field(default=None, description="API key")
     api_base: Optional[str] = Field(default=None, description="API base URL")
     temperature: float = Field(default=0.0, description="Generation temperature")
-    max_retries: int = Field(default=2, description="Maximum retry attempts")
+    max_retries: int = Field(default=3, description="Maximum retry attempts")
 
     provider: Optional[str] = Field(default=None, description="Provider type")
     backend: Optional[str] = Field(
@@ -177,13 +177,9 @@ class VLMConfig(BaseModel):
         """Get LLM completion."""
         return self.get_vlm_instance().get_completion(prompt, thinking)
 
-    async def get_completion_async(
-        self, prompt: str, thinking: bool = False, max_retries: int | None = None
-    ) -> str:
-        """Get LLM completion asynchronously. Uses self.max_retries if not specified."""
-        if max_retries is None:
-            max_retries = self.max_retries
-        return await self.get_vlm_instance().get_completion_async(prompt, thinking, max_retries)
+    async def get_completion_async(self, prompt: str, thinking: bool = False) -> str:
+        """Get LLM completion asynchronously."""
+        return await self.get_vlm_instance().get_completion_async(prompt, thinking)
 
     def is_available(self) -> bool:
         """Check if LLM is configured."""
