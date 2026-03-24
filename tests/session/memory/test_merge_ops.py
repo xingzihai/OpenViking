@@ -26,7 +26,7 @@ from openviking.session.memory.merge_op import (
     apply_str_patch,
 )
 from openviking.session.memory.merge_op.base import FieldType
-from openviking.session.memory.schema_models import (
+from openviking.session.memory.schema_model_generator import (
     SchemaModelGenerator,
     SchemaPromptGenerator,
     to_pascal_case,

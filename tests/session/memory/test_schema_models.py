@@ -18,7 +18,7 @@ from openviking.session.memory.memory_type_registry import (
     MemoryTypeRegistry,
     create_default_registry,
 )
-from openviking.session.memory.schema_models import (
+from openviking.session.memory.schema_model_generator import (
     SchemaModelGenerator,
     SchemaPromptGenerator,
     to_pascal_case,

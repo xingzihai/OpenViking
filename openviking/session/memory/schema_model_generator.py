@@ -17,7 +17,7 @@ from typing_extensions import Annotated, Literal
 
 from openviking.session.memory.dataclass import MemoryTypeSchema
 from openviking.session.memory.merge_op import MergeOp, MergeOpFactory
-from openviking.session.memory.merge_op.base import FieldType, get_python_type_for_field
+from openviking.session.memory.merge_op.base import FieldType, StrPatch, get_python_type_for_field
 from openviking.session.memory.memory_type_registry import MemoryTypeRegistry
 from openviking_cli.utils import get_logger
 
@@ -41,10 +41,14 @@ class SchemaModelGenerator:
     for polymorphic memory data.
     """
 
+    # Generic overview edit model shared by all memory types
+    _generic_overview_edit_model: Optional[Type[BaseModel]] = None
+
     def __init__(self, registry: MemoryTypeRegistry):
         self.registry = registry
         self._model_cache: Dict[str, Type[BaseModel]] = {}
         self._flat_data_models: Dict[str, Type[BaseModel]] = {}
+        self._overview_edit_models: Dict[str, Type[BaseModel]] = {}
         self._union_model: Optional[Type[BaseModel]] = None
         self._operations_model: Optional[Type[BaseModel]] = None
 
@@ -128,6 +132,41 @@ class SchemaModelGenerator:
             models[memory_type.memory_type] = self.create_flat_data_model(memory_type)
         return models
 
+    def create_overview_edit_model(self, memory_type: MemoryTypeSchema) -> Type[BaseModel]:
+        """
+        Create a simplified model for editing .overview.md files.
+
+        The model includes:
+        - memory_type (literal discriminator)
+        - overview (Union[str, StrPatch])
+
+        Args:
+            memory_type: The memory type schema
+
+        Returns:
+            Dynamically created overview edit model class
+        """
+        # Use cached generic model
+        if SchemaModelGenerator._generic_overview_edit_model is not None:
+            return SchemaModelGenerator._generic_overview_edit_model
+
+        # Create generic model with string memory_type (not Literal)
+        model = create_model(
+            "GenericOverviewEdit",
+            __config__=ConfigDict(extra="forbid"),
+            memory_type=(
+                str,
+                Field(..., description="Memory type to edit (e.g., 'profile', 'skills')"),
+            ),
+            overview=(
+                Optional[Union[str, StrPatch]],
+                Field(None, description="Overview content (L1), supports direct string or patch format"),
+            ),
+        )
+
+        SchemaModelGenerator._generic_overview_edit_model = model
+        return model
+
     def create_discriminated_union_model(self) -> Type[BaseModel]:
         """
         Create a unified MemoryData model with discriminator support.
@@ -200,9 +239,10 @@ class SchemaModelGenerator:
             flat_model = self.create_flat_data_model(mt)
             flat_models.append(flat_model)
 
-
         FlatDataUnion = Union[tuple(flat_models)]  # type: ignore
 
+        # Use single generic model for overview edit (same for all memory types)
+        generic_overview_edit = self.create_overview_edit_model(enabled_memory_types[0] if enabled_memory_types else None)
 
         # Create structured operations
         class StructuredMemoryOperations(BaseModel):
@@ -220,6 +260,10 @@ class SchemaModelGenerator:
                 default_factory=list,
                 description="Edit operations with flat data format",
             )
+            edit_overview_uris: List[generic_overview_edit] = Field(  # type: ignore
+                default_factory=list,
+                description="Edit operations for .overview.md files using memory_type",
+            )
             delete_uris: List[str] = Field(
                 default_factory=list,
                 description="Delete operations as URI strings",
@@ -230,6 +274,7 @@ class SchemaModelGenerator:
                 return (
                     len(self.write_uris) == 0
                     and len(self.edit_uris) == 0
+                    and len(self.edit_overview_uris) == 0
                     and len(self.delete_uris) == 0
                 )
 

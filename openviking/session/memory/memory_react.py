@@ -9,7 +9,7 @@ Reference: bot/vikingbot/agent/loop.py AgentLoop structure
 import asyncio
 import json
 from enum import Enum
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Set, Tuple
 
 from pydantic import BaseModel, Field
 
@@ -20,12 +20,13 @@ from openviking.session.memory.utils import (
     detect_language_from_conversation,
     extract_json_from_markdown,
     parse_json_with_stability,
+    parse_memory_file_with_fields,
     pretty_print_messages,
     validate_operations_uris,
 )
 from openviking.session.memory.dataclass import MemoryOperations
 from openviking.session.memory.memory_type_registry import MemoryTypeRegistry
-from openviking.session.memory.schema_models import (
+from openviking.session.memory.schema_model_generator import (
     SchemaModelGenerator,
     SchemaPromptGenerator,
 )
@@ -47,7 +48,7 @@ class MemoryReAct:
     Simplified ReAct orchestrator for memory updates.
 
     Workflow:
-    0. Pre-fetch: System performs ls + read .abstract.md/.overview.md + search
+    0. Pre-fetch: System performs ls + read .overview.md + search
     1. LLM call with tools: Model decides to either use tools OR output final operations
     2. If tools used: Execute and continue loop
     3. If operations output: Return and finish
@@ -60,6 +61,7 @@ class MemoryReAct:
         model: Optional[str] = None,
         max_iterations: int = 5,
         ctx: Optional[RequestContext] = None,
+        registry: Optional[MemoryTypeRegistry] = None,
     ):
         """
         Initialize the MemoryReAct.
@@ -70,6 +72,7 @@ class MemoryReAct:
             model: Model name to use
             max_iterations: Maximum number of ReAct iterations (default: 5)
             ctx: Request context
+            registry: Optional MemoryTypeRegistry - if not provided, will be created
         """
         self.vlm = vlm
         self.viking_fs = viking_fs or get_viking_fs()
@@ -78,16 +81,23 @@ class MemoryReAct:
         self.ctx = ctx
 
         # Initialize schema registry and generators
-        import os
-        schemas_dir = os.path.join(os.path.dirname(__file__), "..", "..", "prompts", "templates", "memory")
-        self.registry = MemoryTypeRegistry()
-        self.registry.load_from_directory(schemas_dir)
+        if registry is not None:
+            self.registry = registry
+        else:
+            import os
+            schemas_dir = os.path.join(os.path.dirname(__file__), "..", "..", "prompts", "templates", "memory")
+            self.registry = MemoryTypeRegistry()
+            self.registry.load_from_directory(schemas_dir)
         self.schema_model_generator = SchemaModelGenerator(self.registry)
         self.schema_prompt_generator = SchemaPromptGenerator(self.registry)
 
         # Pre-generate models and JSON schema
         self.schema_model_generator.generate_all_models()
         self._json_schema = self.schema_model_generator.get_llm_json_schema()
+
+        # Track files read during ReAct for refetch detection
+        self._read_files: Set[str] = set()
+        self._output_language: str = "en"
 
     async def _pre_fetch_context(self, conversation: str) -> Dict[str, Any]:
         """
@@ -115,8 +125,10 @@ class MemoryReAct:
             if not schema.directory:
                 continue
 
-            # Replace variables in directory path
-            dir_path = schema.directory.replace("{user_space}", "default").replace("{agent_space}", "default")
+            # Replace variables in directory path with actual user/agent space
+            user_space = self.ctx.user.user_space_name() if self.ctx and self.ctx.user else "default"
+            agent_space = self.ctx.user.agent_space_name() if self.ctx and self.ctx.user else "default"
+            dir_path = schema.directory.replace("{user_space}", user_space).replace("{agent_space}", agent_space)
 
             # Check if filename_template has variables (contains {xxx})
             has_variables = False
@@ -150,14 +162,14 @@ class MemoryReAct:
                     )
                     call_id_seq += 1
 
-                    result_str = await read_tool.execute(self.viking_fs, self.ctx, uri=f'{dir_uri}/.abstract.md')
+                    result_str = await read_tool.execute(self.viking_fs, self.ctx, uri=f'{dir_uri}/.overview.md')
 
                     add_tool_call_pair_to_messages(
                         messages=messages,
                         call_id=call_id_seq,
                         tool_name='read',
                         params={
-                            "uri": f'{dir_uri}/.abstract.md'
+                            "uri": f'{dir_uri}/.overview.md'
                         },
                         result=result_str
                     )
@@ -189,15 +201,18 @@ class MemoryReAct:
         # Detect output language from conversation
         config = get_openviking_config()
         fallback_language = (config.language_fallback or "en").strip() or "en"
-        output_language = detect_language_from_conversation(
+        self._output_language = detect_language_from_conversation(
             conversation, fallback_language=fallback_language
         )
-        logger.info(f"Detected output language for memory ReAct: {output_language}")
+        logger.info(f"Detected output language for memory ReAct: {self._output_language}")
 
         # Pre-fetch context internally
         tool_call_messages = await self._pre_fetch_context(conversation)
 
-        messages = self._build_initial_messages(conversation, tool_call_messages, output_language)
+        # Reset read files tracking for this run
+        self._read_files.clear()
+
+        messages = self._build_initial_messages(conversation, tool_call_messages, self._output_language)
 
         while iteration < self.max_iterations:
             iteration += 1
@@ -206,11 +221,29 @@ class MemoryReAct:
             # Check if this is the last iteration - force final result
             is_last_iteration = iteration >= self.max_iterations
 
+            # If last iteration, add a message telling the model to return result directly
+            if is_last_iteration:
+                messages.append({
+                    "role": "user",
+                    "content": "You have reached the maximum number of tool call iterations. Do not call any more tools - return your final result directly now."
+                })
+
             # Call LLM with tools - model decides: tool calls OR final operations
             tool_calls, operations = await self._call_llm(messages, force_final=is_last_iteration)
 
-            # If model returned final operations, we're done
+            # If model returned final operations, check if refetch is needed
             if operations is not None:
+                # Check if any write_uris target existing files that weren't read
+                refetch_uris = await self._check_unread_existing_files(operations)
+                if refetch_uris:
+                    logger.info(f"Found unread existing files: {refetch_uris}, refetching...")
+                    # Add refetch results to messages and continue loop
+                    await self._add_refetch_results_to_messages(messages, refetch_uris)
+                    # Clear operations to force another iteration
+                    operations = None
+                    # Continue to next iteration
+                    continue
+
                 final_operations = operations
                 break
 
@@ -243,6 +276,11 @@ class MemoryReAct:
                     "params": tool_call.arguments,
                     "result": result,
                 })
+
+                # Track read tool calls for refetch detection
+                if tool_call.name == "read" and tool_call.arguments.get("uri"):
+                    self._read_files.add(tool_call.arguments["uri"])
+
                 add_tool_call_pair_to_messages(
                     messages,
                     call_id=tool_call.id,
@@ -252,12 +290,13 @@ class MemoryReAct:
                 )
             # Print updated messages with tool results
             pretty_print_messages(messages)
-        logger.info(f'final_operations={final_operations}')
         if final_operations is None:
             if iteration >= self.max_iterations:
                 raise RuntimeError(f"Reached {self.max_iterations} iterations without completion")
             else:
                 raise RuntimeError("ReAct loop completed but no operations generated")
+
+        logger.info(f'final_operations={final_operations.model_dump_json(indent=4)}')
 
         return final_operations, tools_used
 
@@ -273,19 +312,18 @@ class MemoryReAct:
             {
                 "role": "system",
                 "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": f"""## Conversation History
-{conversation}
-
-First, let's explore the memory directory structure and summaries to understand what's already stored.""",
-            },
+            }
         ]
 
         # Add pre-fetched context as tool calls
         messages.extend(tool_call_messages)
+        messages.append({
+                "role": "user",
+                "content": f"""## Conversation History
+{conversation}
 
+After exploring, analyze the conversation and output ALL memory write/edit/delete operations in a single response. Do not output operations one at a time - gather all changes first, then return them together.""",
+        })
         # Print messages in a readable format
         pretty_print_messages(messages)
 
@@ -294,10 +332,12 @@ First, let's explore the memory directory structure and summaries to understand 
 
     def _get_allowed_directories_list(self) -> str:
         """Get a formatted list of allowed directories for the system prompt."""
+        user_space = self.ctx.user.user_space_name() if self.ctx and self.ctx.user else "default"
+        agent_space = self.ctx.user.agent_space_name() if self.ctx and self.ctx.user else "default"
         allowed_dirs = collect_allowed_directories(
             self.registry.list_all(include_disabled=False),
-            user_space="default",
-            agent_space="default",
+            user_space=user_space,
+            agent_space=agent_space,
         )
         if not allowed_dirs:
             return "No directories configured (this is an error)."
@@ -313,14 +353,19 @@ First, let's explore the memory directory structure and summaries to understand 
 
 ## Workflow
 1. Analyze the conversation and pre-fetched context
-2. If you need more information, use the available tools (read/search/ls/tree)
+2. If you need more information, use the available tools (read/search)
 3. When you have enough information, output ONLY a JSON object (no extra text before or after)
+
+## CRITICAL: Available Tools
+- ONLY read and search tools are available
+- DO NOT use write tool - just output the JSON result, the system will handle writing
+- ls tool is NOT available
 
 ## Critical: Read Before Edit
 IMPORTANT: Before you edit or update ANY existing memory file, you MUST first use the read tool to read its complete content.
 
-- The ls tool only shows you what files exist - it does NOT show you the file content
-- The pre-fetched summaries (.abstract.md and .overview.md) are only partial information - they are NOT the complete memory content
+- The pre-fetched .overview.md files are only partial information - they are NOT the complete memory content
+- The pre-fetched .overview.md files are only partial information - they are NOT the complete memory content
 - You MUST use the read tool to get the actual content of any file you want to edit
 - Without reading the actual file first, your edit operations will fail because the search string won't match
 
@@ -331,14 +376,27 @@ All memory content (abstract, overview, content fields) MUST be written in {outp
 IMPORTANT: You do NOT need to construct URIs manually. The system will automatically generate URIs based on:
 - For write_uris: Using memory_type and fields
 - For edit_uris: Using memory_type and fields to identify the target
+- For edit_overview_uris: Using memory_type to identify the directory, then updates the .overview.md file in that directory
 - For delete_uris: Using memory_type and fields to identify the target
 
 Just provide the correct memory_type and fields, and the system will handle the rest.
 
-## Allowed Directories
-IMPORTANT: All memory operations will be validated to be within these directories:
+## Edit Overview Files (IMPORTANT - Don't Forget!)
+You MUST use edit_overview_uris to update the .overview.md file whenever you write new memories.
 
-{allowed_dirs_list}
+This is a REQUIRED step after writing memories:
+1. After adding new entries via write_uris, ALWAYS also update the corresponding .overview.md
+2. The .overview.md provides a high-level summary for that memory type directory
+3. Without updating overview, new memories won't be visible in high-level summaries
+
+Example workflow:
+- write_uris: Add new skill "Python async programming" → writes to skills/python_async.md
+- edit_overview_uris: {{"memory_type": "skills", "overview": "Python async programming, Go concurrency, System design..."}}
+
+How to use edit_overview_uris:
+- Provide memory_type to identify which directory's overview to update
+- Provide overview field with the new content (string or patch format)
+- Example: {{"memory_type": "profile", "overview": "User profile overview..."}}
 
 ## Final Output Format
 Outputs will be a complete JSON object with the following fields (Don't have '```json' appear and do not use '//' to omit content)
@@ -349,7 +407,8 @@ JSON schema:
 ```
 
 ## Important Notes
-- Always read a file before editing it - ls and summaries are not enough
+- DO NOT use write tool - the system will write memories based on your JSON output
+- Only read and search tools are available for you to use
 - Output ONLY the JSON object - no extra text before or after
 - Put your thinking and reasoning in the `reasonning` field of the JSON
 """
@@ -400,6 +459,17 @@ JSON schema:
             max_retries=self.vlm.max_retries,
         )
 
+        # Log cache hit info
+        if hasattr(response, 'usage') and response.usage:
+            usage = response.usage
+            prompt_tokens = usage.get('prompt_tokens', 0)
+            cached_tokens = usage.get('prompt_tokens_details', {}).get('cached_tokens', 0) if isinstance(usage.get('prompt_tokens_details'), dict) else 0
+            if prompt_tokens > 0:
+                cache_hit_rate = (cached_tokens / prompt_tokens) * 100
+                logger.info(f"[KVCache] prompt_tokens={prompt_tokens}, cached_tokens={cached_tokens}, cache_hit_rate={cache_hit_rate:.1f}%")
+            else:
+                logger.info(f"[KVCache] prompt_tokens={prompt_tokens}, cached_tokens={cached_tokens}")
+
         # Case 1: LLM returned tool calls
         if response.has_tool_calls:
             # Format tool calls nicely for debug logging
@@ -420,7 +490,7 @@ JSON schema:
                 operations, error = parse_json_with_stability(
                     content=content,
                     model_class=operations_model,
-                    expected_fields=['reasoning', 'write_uris', 'edit_uris', 'delete_uris'],
+                    expected_fields=['reasoning', 'write_uris', 'edit_uris', 'edit_overview_uris', 'delete_uris'],
                 )
 
                 if error is not None:
@@ -430,7 +500,7 @@ JSON schema:
                     operations, error_fallback = parse_json_with_stability(
                         content=content_no_md,
                         model_class=MemoryOperations,
-                        expected_fields=['reasoning', 'write_uris', 'edit_uris', 'delete_uris'],
+                        expected_fields=['reasoning', 'write_uris', 'edit_uris', 'edit_overview_uris', 'delete_uris'],
                     )
                     if error_fallback is not None:
                         logger.warning(f"Fallback parse also failed: {error_fallback}")
@@ -470,3 +540,70 @@ JSON schema:
     ) -> List[Any]:
         """Execute tasks in parallel, similar to AgentLoop."""
         return await asyncio.gather(*tasks)
+
+    async def _check_unread_existing_files(
+        self,
+        operations: MemoryOperations,
+    ) -> List[str]:
+        """Check if write_uris target existing files that weren't read during ReAct."""
+        if not operations.write_uris:
+            return []
+
+        from openviking.session.memory.utils.uri import resolve_flat_model_uri
+
+        refetch_uris = []
+        for op in operations.write_uris:
+            # Resolve the flat model to URI
+            try:
+                uri = resolve_flat_model_uri(op, self.registry, "default", "default")
+            except Exception as e:
+                logger.warning(f"Failed to resolve URI for {op}: {e}")
+                continue
+
+            # Skip if already read
+            if uri in self._read_files:
+                continue
+            # Check if file exists
+            try:
+                await self.viking_fs.read_file(uri, ctx=self.ctx)
+                # File exists and wasn't read - need refetch
+                refetch_uris.append(uri)
+            except Exception:
+                # File doesn't exist, no need to refetch
+                pass
+        return refetch_uris
+
+    async def _add_refetch_results_to_messages(
+        self,
+        messages: List[Dict[str, Any]],
+        refetch_uris: List[str],
+    ) -> None:
+        """Add existing file content as read tool results to messages."""
+        # Calculate call_id based on existing tool messages
+        call_id_seq = len([m for m in messages if m.get("role") == "tool"]) + 1000
+
+        for uri in refetch_uris:
+            try:
+                content = await self.viking_fs.read_file(uri, ctx=self.ctx)
+                parsed = parse_memory_file_with_fields(content)
+
+                # Add as read tool call + result
+                add_tool_call_pair_to_messages(
+                    messages=messages,
+                    call_id=call_id_seq,
+                    tool_name="read",
+                    params={"uri": uri},
+                    result=parsed,
+                )
+                call_id_seq += 1
+
+                # Mark as read
+                self._read_files.add(uri)
+            except Exception as e:
+                logger.warning(f"Failed to refetch {uri}: {e}")
+
+        # Add reminder message for the model
+        messages.append({
+            "role": "user",
+            "content": "Note: The files above were automatically read because they exist and you didn't read them before deciding to write. Please consider the existing content when making write decisions. You can now output updated operations."
+        })

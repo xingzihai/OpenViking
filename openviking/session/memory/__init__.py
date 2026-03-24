@@ -29,7 +29,7 @@ from openviking.session.memory.memory_react import (
 )
 from openviking.session.memory.memory_type_registry import MemoryTypeRegistry
 from openviking.session.memory.memory_updater import MemoryUpdater, MemoryUpdateResult
-from openviking.session.memory.schema_models import (
+from openviking.session.memory.schema_model_generator import (
     SchemaModelGenerator,
     SchemaPromptGenerator,
 )
