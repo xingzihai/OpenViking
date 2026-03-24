@@ -6,6 +6,7 @@ import asyncio
 import base64
 import json
 import logging
+import time
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -124,13 +125,17 @@ class VolcEngineVLM(OpenAIVLM):
             "temperature": self.temperature,
             "thinking": {"type": "disabled" if not thinking else "enabled"},
         }
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
 
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
 
+        t0 = time.perf_counter()
         response = client.chat.completions.create(**kwargs)
-        self._update_token_usage_from_response(response)
+        elapsed = time.perf_counter() - t0
+        self._update_token_usage_from_response(response, duration_seconds=elapsed)
         return self._build_vlm_response(response, has_tools=bool(tools))
 
     async def get_completion_async(
@@ -155,6 +160,8 @@ class VolcEngineVLM(OpenAIVLM):
             "temperature": self.temperature,
             "thinking": {"type": "disabled" if not thinking else "enabled"},
         }
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
 
         if tools:
             kwargs["tools"] = tools
@@ -163,8 +170,12 @@ class VolcEngineVLM(OpenAIVLM):
         last_error = None
         for attempt in range(max_retries + 1):
             try:
+                t0 = time.perf_counter()
                 response = await client.chat.completions.create(**kwargs)
-                self._update_token_usage_from_response(response)
+                elapsed = time.perf_counter() - t0
+                self._update_token_usage_from_response(
+                    response, duration_seconds=elapsed,
+                )
                 return self._build_vlm_response(response, has_tools=bool(tools))
             except Exception as e:
                 last_error = e
@@ -318,13 +329,17 @@ class VolcEngineVLM(OpenAIVLM):
             "temperature": self.temperature,
             "thinking": {"type": "disabled" if not thinking else "enabled"},
         }
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
 
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        t0 = time.perf_counter()
         response = client.chat.completions.create(**kwargs)
-        self._update_token_usage_from_response(response)
+        elapsed = time.perf_counter() - t0
+        self._update_token_usage_from_response(response, duration_seconds=elapsed)
         return self._build_vlm_response(response, has_tools=bool(tools))
 
     async def get_vision_completion_async(
@@ -355,11 +370,15 @@ class VolcEngineVLM(OpenAIVLM):
             "temperature": self.temperature,
             "thinking": {"type": "disabled" if not thinking else "enabled"},
         }
+        if self.max_tokens is not None:
+            kwargs["max_tokens"] = self.max_tokens
 
         if tools:
             kwargs["tools"] = tools
             kwargs["tool_choice"] = "auto"
 
+        t0 = time.perf_counter()
         response = await client.chat.completions.create(**kwargs)
-        self._update_token_usage_from_response(response)
+        elapsed = time.perf_counter() - t0
+        self._update_token_usage_from_response(response, duration_seconds=elapsed)
         return self._build_vlm_response(response, has_tools=bool(tools))

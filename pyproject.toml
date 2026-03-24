@@ -2,7 +2,6 @@
 requires = [
     "setuptools>=61.0",
     "setuptools-scm>=8.0",
-    "pybind11>=2.13.0",
     "cmake>=3.15",
     "wheel",
 ]
@@ -40,6 +39,8 @@ dependencies = [
     "openai>=1.0.0",
     "requests>=2.31.0",
     "python-docx>=1.0.0",
+    "olefile>=0.47",
+    "xlrd>=2.0.1",
     "python-pptx>=1.0.0",
     "openpyxl>=3.0.0",
     "ebooklib>=0.18.0",
@@ -68,6 +69,8 @@ dependencies = [
     "tree-sitter-go>=0.23.0",
     "tree-sitter-c-sharp>=0.23.0",
     "loguru>=0.7.3",
+    "cryptography>=42.0.0",
+    "argon2-cffi>=23.0.0",
 ]
 
 [tool.uv.sources]
@@ -83,6 +86,7 @@ test = [
     "datasets>=2.0.0",
     "pandas>=2.0.0",
     "diff-match-patch>=20200713",
+    "hvac>=2.0.0",
 ]
 dev = [
     "mypy>=1.0.0",
@@ -98,10 +102,16 @@ eval = [
     "datasets>=2.0.0",
     "pandas>=2.0.0",
 ]
+gemini = [
+    "google-genai>=1.0.0",
+]
+gemini-async = [
+    "google-genai>=1.0.0",
+    "anyio>=4.0.0",
+]
 build = [
     "setuptools>=61.0",
     "setuptools-scm>=8.0",
-    "pybind11>=2.13.0",
     "cmake>=3.15",
     "wheel",
     "build",
@@ -124,6 +134,7 @@ bot = [
     "html2text>=2020.1.16",
     "beautifulsoup4>=4.12.0",
     "ddgs>=9.0.0",
+    "tavily-python>=0.5.0",
     "gradio>=6.6.0",
     "py-machineid>=1.0.0",
 ]
@@ -176,7 +187,9 @@ openviking = [
     "lib/libagfsbinding.dylib",
     "lib/libagfsbinding.dll",
     "bin/ov",
-    "bin/ov.exe"
+    "bin/ov.exe",
+    "storage/vectordb/engine/*.abi3.so",
+    "storage/vectordb/engine/*.pyd",
 ]
 vikingbot = [
     "**/*.mjs",
@@ -209,7 +222,7 @@ addopts = "-v --cov=openviking --cov-report=term-missing"
 [tool.ruff]
 line-length = 100
 exclude = ["third_party"]
-target-version = "py39"
+target-version = "py310"
 
 [tool.ruff.lint]
 select = [
@@ -239,3 +252,8 @@ quote-style = "double"
 indent-style = "space"
 skip-magic-trailing-comma = false
 line-ending = "auto"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

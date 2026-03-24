@@ -9,6 +9,11 @@ from openviking_cli.utils import get_logger
 from openviking_cli.utils.config import get_openviking_config
 
 from openviking.session.compressor import ExtractionStats, SessionCompressor
+from openviking.session.memory_archiver import (
+    ArchivalCandidate,
+    ArchivalResult,
+    MemoryArchiver,
+)
 from openviking.session.memory_deduplicator import (
     DedupDecision,
     DedupResult,
@@ -74,6 +79,10 @@ __all__ = [
     "SessionCompressor",
     "ExtractionStats",
     "create_session_compressor",
+    # Memory Archiver
+    "MemoryArchiver",
+    "ArchivalCandidate",
+    "ArchivalResult",
     # Memory Extractor
     "MemoryExtractor",
     "MemoryCategory",

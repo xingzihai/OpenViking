@@ -55,21 +55,21 @@ class SessionCompressorV2:
     def _get_or_create_react(
         self, ctx: Optional[RequestContext] = None
     ) -> MemoryReAct:
-        """Get or create MemoryReAct instance."""
-        if self._react_orchestrator is not None:
-            return self._react_orchestrator
+        """Create new MemoryReAct instance with current ctx.
 
+        Note: Always create new instance to avoid cross-session isolation issues.
+        The ctx contains request-scoped state that must not be shared across requests.
+        """
         config = get_openviking_config()
         vlm = config.vlm.get_vlm_instance()
         viking_fs = get_viking_fs()
 
-        self._react_orchestrator = MemoryReAct(
+        return MemoryReAct(
             vlm=vlm,
             viking_fs=viking_fs,
             ctx=ctx,
             registry=self._registry,
         )
-        return self._react_orchestrator
 
     def _get_or_create_updater(self) -> MemoryUpdater:
         """Get or create MemoryUpdater instance."""

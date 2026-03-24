@@ -5,11 +5,12 @@ from pathlib import Path
 from threading import Lock
 from typing import Any, Dict, Optional
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from openviking_cli.session.user_id import UserIdentifier
 
 from .config_loader import resolve_config_path
+from .config_utils import format_validation_error, raise_unknown_config_fields
 from .consts import (
     DEFAULT_CONFIG_DIR,
     DEFAULT_OV_CONF,
@@ -17,15 +18,18 @@ from .consts import (
     SYSTEM_CONFIG_DIR,
 )
 from .embedding_config import EmbeddingConfig
+from .encryption_config import EncryptionConfig
 from .log_config import LogConfig
 from .parser_config import (
     AudioConfig,
     CodeConfig,
     DirectoryConfig,
+    FeishuConfig,
     HTMLConfig,
     ImageConfig,
     MarkdownConfig,
     PDFConfig,
+    SemanticConfig,
     TextConfig,
     VideoConfig,
 )
@@ -56,6 +60,11 @@ class OpenVikingConfig(BaseModel):
 
     rerank: RerankConfig = Field(
         default_factory=lambda: RerankConfig(), description="Rerank configuration"
+    )
+
+    # Encryption configuration
+    encryption: EncryptionConfig = Field(
+        default_factory=lambda: EncryptionConfig(), description="Encryption configuration"
     )
 
     # Parser configurations
@@ -93,6 +102,16 @@ class OpenVikingConfig(BaseModel):
 
     directory: DirectoryConfig = Field(
         default_factory=lambda: DirectoryConfig(), description="Directory parsing configuration"
+    )
+
+    feishu: FeishuConfig = Field(
+        default_factory=lambda: FeishuConfig(),
+        description="Feishu/Lark document parsing configuration",
+    )
+
+    semantic: SemanticConfig = Field(
+        default_factory=lambda: SemanticConfig(),
+        description="Semantic processing configuration (overview/abstract limits)",
     )
 
     auto_generate_l0: bool = Field(
@@ -135,57 +154,78 @@ class OpenVikingConfig(BaseModel):
     @classmethod
     def from_dict(cls, config: Dict[str, Any]) -> "OpenVikingConfig":
         """Create configuration from dictionary."""
-        # Make a copy to avoid modifying the original
-        config_copy = config.copy()
+        try:
+            # Make a copy to avoid modifying the original
+            config_copy = config.copy()
 
-        # Remove sections managed by other loaders (e.g. server config)
-        config_copy.pop("server", None)
-        config_copy.pop("bot", None)
+            parser_types = [
+                "pdf",
+                "code",
+                "image",
+                "audio",
+                "video",
+                "markdown",
+                "html",
+                "text",
+                "directory",
+                "feishu",
+            ]
+            raise_unknown_config_fields(
+                data=config_copy,
+                valid_fields=set(cls.model_fields.keys()) | {"server", "bot", "parsers"},
+                context_name="OpenVikingConfig",
+            )
 
-        # Handle parser configurations from nested "parsers" section
-        parser_configs = {}
-        if "parsers" in config_copy:
-            parser_configs = config_copy.pop("parsers")
-        parser_types = [
-            "pdf",
-            "code",
-            "image",
-            "audio",
-            "video",
-            "markdown",
-            "html",
-            "text",
-            "directory",
-        ]
-        for parser_type in parser_types:
-            if parser_type in config_copy:
-                parser_configs[parser_type] = config_copy.pop(parser_type)
-        # Handle log configuration from nested "log" section
-        log_config_data = None
-        if "log" in config_copy:
-            log_config_data = config_copy.pop("log")
+            # Remove sections managed by other loaders (e.g. server config)
+            config_copy.pop("server", None)
+            config_copy.pop("bot", None)
 
-        # Handle memory configuration from nested "memory" section
-        memory_config_data = None
-        if "memory" in config_copy:
-            memory_config_data = config_copy.pop("memory")
+            # Handle parser configurations from nested "parsers" section
+            parser_configs = {}
+            if "parsers" in config_copy:
+                parser_configs = config_copy.pop("parsers")
+                if parser_configs is None:
+                    parser_configs = {}
+                if not isinstance(parser_configs, dict):
+                    raise ValueError("Invalid parsers config: 'parsers' section must be an object")
+            raise_unknown_config_fields(
+                data=parser_configs,
+                valid_fields=set(parser_types),
+                context_name="parsers",
+            )
+            for parser_type in parser_types:
+                if parser_type in config_copy:
+                    parser_configs[parser_type] = config_copy.pop(parser_type)
 
-        instance = cls(**config_copy)
-        # Apply log configuration
-        if log_config_data is not None:
-            instance.log = LogConfig.from_dict(log_config_data)
+            # Handle log configuration from nested "log" section
+            log_config_data = None
+            if "log" in config_copy:
+                log_config_data = config_copy.pop("log")
 
-        # Apply memory configuration
-        if memory_config_data is not None:
-            instance.memory = MemoryConfig.from_dict(memory_config_data)
+            # Handle memory configuration from nested "memory" section
+            memory_config_data = None
+            if "memory" in config_copy:
+                memory_config_data = config_copy.pop("memory")
 
-        # Apply parser configurations
-        for parser_type, parser_data in parser_configs.items():
-            if hasattr(instance, parser_type):
-                config_class = getattr(instance, parser_type).__class__
-                setattr(instance, parser_type, config_class.from_dict(parser_data))
+            instance = cls(**config_copy)
 
-        return instance
+            # Apply log configuration
+            if log_config_data is not None:
+                instance.log = LogConfig.from_dict(log_config_data)
+
+            # Apply memory configuration
+            if memory_config_data is not None:
+                instance.memory = MemoryConfig.from_dict(memory_config_data)
+
+            # Apply parser configurations
+            for parser_type, parser_data in parser_configs.items():
+                if hasattr(instance, parser_type):
+                    config_class = getattr(instance, parser_type).__class__
+                    setattr(instance, parser_type, config_class.from_dict(parser_data))
+
+            return instance
+        except ValidationError as e:
+            raise ValueError(format_validation_error(root_model=cls, error=e)) from e
 
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
@@ -271,6 +311,8 @@ class OpenVikingConfigSingleton:
             return OpenVikingConfig.from_dict(config_data)
         except json.JSONDecodeError as e:
             raise ValueError(f"Config file JSON format error: {e}")
+        except ValueError:
+            raise
         except Exception as e:
             raise RuntimeError(f"Failed to load config file: {e}")
 
@@ -366,7 +408,7 @@ def initialize_openviking_config(
         config.storage.vectordb.backend = config.storage.vectordb.backend or "local"
         # Resolve and update workspace + dependent paths (model_validator won't
         # re-run on attribute assignment, so sync agfs.path / vectordb.path here).
-        workspace_path = Path(path).resolve()
+        workspace_path = Path(path).expanduser().resolve()
         workspace_path.mkdir(parents=True, exist_ok=True)
         resolved = str(workspace_path)
         config.storage.workspace = resolved

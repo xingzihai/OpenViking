@@ -7,12 +7,11 @@ from vikingbot.agent.tools.filesystem import ReadFileTool, WriteFileTool, EditFi
 from vikingbot.agent.tools.image import ImageGenerationTool
 from vikingbot.agent.tools.message import MessageTool
 from vikingbot.agent.tools.ov_file import (
-    VikingReadTool,
     VikingListTool,
     VikingSearchTool,
     VikingGrepTool,
     VikingGlobTool,
-    VikingSearchUserMemoryTool,
+    VikingMultiReadTool,
     VikingMemoryCommitTool,
     VikingAddResourceTool,
 )
@@ -58,6 +57,7 @@ def register_default_tools(
     exec_config = config.tools.exec
     brave_api_key = config.tools.web.search.api_key if config.tools.web.search else None
     exa_api_key = None  # TODO: Add to config if needed
+    tavily_api_key = config.tools.web.search.tavily_api_key if config.tools.web.search else None
 
     # Get provider API key and base from config
 
@@ -80,18 +80,17 @@ def register_default_tools(
 
     # Web tools
     registry.register(
-        WebSearchTool(backend="auto", brave_api_key=brave_api_key, exa_api_key=exa_api_key)
+        WebSearchTool(backend="auto", brave_api_key=brave_api_key, exa_api_key=exa_api_key, tavily_api_key=tavily_api_key)
     )
     registry.register(WebFetchTool())
 
     # Open Viking tools
     if include_viking_tools:
-        registry.register(VikingReadTool())
+        registry.register(VikingMultiReadTool())
         registry.register(VikingListTool())
         registry.register(VikingSearchTool())
         registry.register(VikingGrepTool())
         registry.register(VikingGlobTool())
-        registry.register(VikingSearchUserMemoryTool())
         registry.register(VikingMemoryCommitTool())
         if not config.read_only:
             registry.register(VikingAddResourceTool())

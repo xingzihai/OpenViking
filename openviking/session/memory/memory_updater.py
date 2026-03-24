@@ -120,12 +120,16 @@ class MemoryUpdater:
         if not resolved_registry:
             raise ValueError("MemoryTypeRegistry is required for URI resolution")
 
+        # Get actual user/agent space from ctx
+        user_space = ctx.user.user_space_name() if ctx and ctx.user else "default"
+        agent_space = ctx.user.agent_space_name() if ctx and ctx.user else "default"
+
         # Resolve all URIs first
         resolved_ops = resolve_all_operations(
             operations,
             resolved_registry,
-            user_space="default",
-            agent_space="default",
+            user_space=user_space,
+            agent_space=agent_space,
         )
 
         if resolved_ops.has_errors():

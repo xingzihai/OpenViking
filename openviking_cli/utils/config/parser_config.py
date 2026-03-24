@@ -12,6 +12,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Optional, Union
 
+from .config_utils import raise_unknown_config_fields
+
 
 @dataclass
 class ParserConfig:
@@ -25,8 +27,9 @@ class ParserConfig:
         enabled: Whether the parser is enabled
         max_content_length: Maximum content length to process (characters)
         encoding: Default file encoding
-        max_section_size: Maximum characters per section before splitting
+        max_section_size: Maximum tokens per section before splitting
         section_size_flexibility: Allow overflow to maintain coherence (0.0-1.0)
+        max_section_chars: Hard character limit per section (guards against token estimation errors)
     """
 
     enabled: bool = True
@@ -36,6 +39,9 @@ class ParserConfig:
     # Smart splitting configuration
     max_section_size: int = 1000  # Maximum tokens per section before splitting
     section_size_flexibility: float = 0.3  # Allow 30% overflow to maintain coherence
+    max_section_chars: int = (
+        6000  # Hard character limit per section (guards against token estimation errors)
+    )
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> "ParserConfig":
@@ -48,13 +54,15 @@ class ParserConfig:
         Returns:
             ParserConfig instance
 
+        Raises:
+            ValueError: If the dictionary contains unknown fields (with suggestions)
+
         Examples:
             >>> config = ParserConfig.from_dict({"max_content_length": 50000})
         """
-        # Filter only fields that belong to this class
         valid_fields = {f.name for f in cls.__dataclass_fields__.values()}
-        filtered_data = {k: v for k, v in data.items() if k in valid_fields}
-        return cls(**filtered_data)
+        raise_unknown_config_fields(data=data, valid_fields=valid_fields, context_name=cls.__name__)
+        return cls(**data)
 
     @classmethod
     def from_yaml(cls, yaml_path: Union[str, Path]) -> "ParserConfig":
@@ -103,6 +111,9 @@ class ParserConfig:
 
         if not 0.0 <= self.section_size_flexibility <= 1.0:
             raise ValueError("section_size_flexibility must be between 0.0 and 1.0")
+
+        if self.max_section_chars <= 0:
+            raise ValueError("max_section_chars must be positive")
 
     def to_dict(self) -> Dict[str, Any]:
         """
@@ -466,6 +477,34 @@ class TextConfig(ParserConfig):
 
 
 @dataclass
+class FeishuConfig(ParserConfig):
+    """
+    Configuration for Feishu/Lark document parsing.
+
+    Attributes:
+        app_id: Feishu app ID (can also be set via FEISHU_APP_ID env var)
+        app_secret: Feishu app secret (can also be set via FEISHU_APP_SECRET env var)
+        domain: Feishu API domain
+        max_rows_per_sheet: Maximum rows per sheet for spreadsheets
+        max_records_per_table: Maximum records per table for bitable
+        download_images: Whether to download images from documents
+        request_timeout: HTTP request timeout in seconds
+    """
+
+    app_id: str = ""
+    app_secret: str = ""
+    domain: str = "https://open.feishu.cn"
+    max_rows_per_sheet: int = 1000
+    max_records_per_table: int = 1000
+    download_images: bool = (
+        True  # TODO: not yet implemented, reserved for future image download support
+    )
+    request_timeout: float = (
+        30.0  # TODO: not yet passed to lark-oapi client, reserved for future use
+    )
+
+
+@dataclass
 class DirectoryConfig(ParserConfig):
     """
     Configuration for directory parsing.
@@ -480,6 +519,42 @@ class DirectoryConfig(ParserConfig):
     preserve_structure: bool = True
 
 
+@dataclass
+class SemanticConfig:
+    """
+    Configuration for semantic processing (overview/abstract generation).
+
+    Controls prompt budget limits and output size constraints for the
+    SemanticProcessor pipeline.
+    """
+
+    max_file_content_chars: int = 30000
+    """Maximum characters of file content sent to LLM for summary generation."""
+
+    max_skeleton_chars: int = 12000
+    """Maximum characters of AST skeleton used for embedding (~3000 tokens)."""
+
+    max_overview_prompt_chars: int = 60000
+    """Maximum characters allowed in the overview generation prompt.
+    If exceeded, file summaries are batched and merged."""
+
+    overview_batch_size: int = 50
+    """Maximum number of file summaries per batch when splitting oversized prompts."""
+
+    abstract_max_chars: int = 256
+    """Maximum characters for generated abstracts."""
+
+    overview_max_chars: int = 4000
+    """Maximum characters for generated overviews."""
+
+    memory_chunk_chars: int = 2000
+    """Maximum characters per chunk when splitting long memories for vectorization.
+    Memories shorter than this are vectorized as a single record."""
+
+    memory_chunk_overlap: int = 200
+    """Character overlap between adjacent memory chunks for context continuity."""
+
+
 # Configuration registry for dynamic loading
 PARSER_CONFIG_REGISTRY = {
     "pdf": PDFConfig,
@@ -491,6 +566,7 @@ PARSER_CONFIG_REGISTRY = {
     "html": HTMLConfig,
     "text": TextConfig,
     "directory": DirectoryConfig,
+    "feishu": FeishuConfig,
 }
 
 
@@ -550,6 +626,12 @@ def load_parser_configs_from_dict(config_dict: Dict[str, Any]) -> Dict[str, Pars
         >>> pdf_config = configs["pdf"]
         >>> code_config = configs["code"]
     """
+    raise_unknown_config_fields(
+        data=config_dict,
+        valid_fields=set(PARSER_CONFIG_REGISTRY.keys()),
+        context_name="parsers",
+    )
+
     configs = {}
 
     for parser_type, config_class in PARSER_CONFIG_REGISTRY.items():

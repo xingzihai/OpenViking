@@ -1,19 +1,37 @@
+import importlib
 import json
 import os
+import platform
 import shutil
 import subprocess
 import sys
 import sysconfig
 from pathlib import Path
 
-import pybind11
 from setuptools import Extension, setup
 from setuptools.command.build_ext import build_ext
+
+try:
+    from wheel.bdist_wheel import bdist_wheel
+except ImportError:  # pragma: no cover - local build_ext may not have wheel installed
+    bdist_wheel = None
+
+SETUP_DIR = Path(__file__).resolve().parent
+if str(SETUP_DIR) not in sys.path:
+    sys.path.insert(0, str(SETUP_DIR))
+
+get_host_engine_build_config = importlib.import_module(
+    "build_support.x86_profiles"
+).get_host_engine_build_config
+resolve_openviking_version = importlib.import_module(
+    "build_support.versioning"
+).resolve_openviking_version
 
 CMAKE_PATH = shutil.which("cmake") or "cmake"
 C_COMPILER_PATH = shutil.which("gcc") or "gcc"
 CXX_COMPILER_PATH = shutil.which("g++") or "g++"
 ENGINE_SOURCE_DIR = "src/"
+ENGINE_BUILD_CONFIG = get_host_engine_build_config(platform.machine())
 
 
 class OpenVikingBuildExt(build_ext):
@@ -269,6 +287,9 @@ class OpenVikingBuildExt(build_ext):
             print("Building ov CLI from source...")
             try:
                 env = os.environ.copy()
+                env["OPENVIKING_VERSION"] = resolve_openviking_version(
+                    env=env, project_root=SETUP_DIR
+                )
                 build_args = ["cargo", "build", "--release"]
                 target = env.get("CARGO_BUILD_TARGET")
                 if target:
@@ -320,38 +341,54 @@ class OpenVikingBuildExt(build_ext):
 
     def build_extension(self, ext):
         """Build a single Python native extension artifact using CMake."""
+        if getattr(self, "_engine_extensions_built", False):
+            return
+
         ext_fullpath = Path(self.get_ext_fullpath(ext.name))
         ext_dir = ext_fullpath.parent.resolve()
         build_dir = Path(self.build_temp) / "cmake_build"
         build_dir.mkdir(parents=True, exist_ok=True)
+        self._clean_stale_engine_artifacts(ext_dir)
 
         self._run_stage_with_artifact_checks(
             "CMake build",
             lambda: self._build_extension_impl(ext_fullpath, ext_dir, build_dir),
             [(ext_fullpath, f"native extension '{ext.name}'")],
         )
+        self._engine_extensions_built = True
+
+    def _clean_stale_engine_artifacts(self, ext_dir: Path):
+        """Remove stale non-abi3 engine binaries from wheel build output directories."""
+        source_engine_dir = (SETUP_DIR / "openviking" / "storage" / "vectordb" / "engine").resolve()
+        if ext_dir == source_engine_dir:
+            return
+
+        for pattern in ("*.so", "*.pyd"):
+            for artifact in ext_dir.glob(pattern):
+                artifact.unlink()
 
     def _build_extension_impl(self, ext_fullpath, ext_dir, build_dir):
         """Invoke CMake to build the Python native extension."""
-        py_output_name = ext_fullpath.stem
-        py_output_suffix = ext_fullpath.suffix
+        ext_basename = ext_fullpath.stem.split(".")[0]
+        built_filename = Path(self.get_ext_filename(self.extensions[0].name)).name
+        py_ext_suffix = built_filename.removeprefix(ext_basename)
+        if not py_ext_suffix:
+            py_ext_suffix = sysconfig.get_config_var("EXT_SUFFIX") or ext_fullpath.suffix
 
         cmake_args = [
             f"-S{Path(ENGINE_SOURCE_DIR).resolve()}",
             f"-B{build_dir}",
             "-DCMAKE_BUILD_TYPE=Release",
-            f"-DPY_OUTPUT_DIR={ext_dir}",
-            f"-DPY_OUTPUT_NAME={py_output_name}",
-            f"-DPY_OUTPUT_SUFFIX={py_output_suffix}",
+            f"-DOV_PY_OUTPUT_DIR={ext_dir}",
+            f"-DOV_PY_EXT_SUFFIX={py_ext_suffix}",
+            f"-DOV_X86_BUILD_VARIANTS={';'.join(ENGINE_BUILD_CONFIG.cmake_variants)}",
             "-DCMAKE_VERBOSE_MAKEFILE=ON",
             "-DCMAKE_INSTALL_RPATH=$ORIGIN",
             f"-DPython3_EXECUTABLE={sys.executable}",
             f"-DPython3_INCLUDE_DIRS={sysconfig.get_path('include')}",
             f"-DPython3_LIBRARIES={sysconfig.get_config_vars().get('LIBRARY')}",
-            f"-Dpybind11_DIR={pybind11.get_cmake_dir()}",
             f"-DCMAKE_C_COMPILER={C_COMPILER_PATH}",
             f"-DCMAKE_CXX_COMPILER={CXX_COMPILER_PATH}",
-            f"-DOV_X86_SIMD_LEVEL={os.environ.get('OV_X86_SIMD_LEVEL', 'AVX2')}",
         ]
 
         if sys.platform == "darwin":
@@ -368,19 +405,35 @@ class OpenVikingBuildExt(build_ext):
         self.spawn([self.cmake_executable] + build_args)
 
 
+if bdist_wheel is not None:
+
+    class OpenVikingBdistWheel(bdist_wheel):
+        def finalize_options(self):
+            super().finalize_options()
+            self.py_limited_api = "cp310"
+else:
+    OpenVikingBdistWheel = None
+
+
+cmdclass = {
+    "build_ext": OpenVikingBuildExt,
+}
+if OpenVikingBdistWheel is not None:
+    cmdclass["bdist_wheel"] = OpenVikingBdistWheel
+
+
 setup(
     # install_requires=[
     #     f"pyagfs @ file://localhost/{os.path.abspath('third_party/agfs/agfs-sdk/python')}"
     # ],
     ext_modules=[
         Extension(
-            name="openviking.storage.vectordb.engine",
+            name=ENGINE_BUILD_CONFIG.primary_extension,
             sources=[],
+            py_limited_api=True,
         )
     ],
-    cmdclass={
-        "build_ext": OpenVikingBuildExt,
-    },
+    cmdclass=cmdclass,
     package_data={
         "openviking": [
             "bin/agfs-server",
@@ -390,6 +443,8 @@ setup(
             "lib/libagfsbinding.dll",
             "bin/ov",
             "bin/ov.exe",
+            "storage/vectordb/engine/*.abi3.so",
+            "storage/vectordb/engine/*.pyd",
         ],
     },
     include_package_data=True,

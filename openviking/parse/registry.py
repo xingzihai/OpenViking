@@ -26,6 +26,7 @@ from openviking.parse.parsers.powerpoint import PowerPointParser
 from openviking.parse.parsers.text import TextParser
 
 # Import markitdown-inspired parsers
+from openviking.parse.parsers.legacy_doc import LegacyDocParser
 from openviking.parse.parsers.word import WordParser
 from openviking.parse.parsers.zip_parser import ZipParser
 
@@ -62,6 +63,7 @@ class ParserRegistry:
 
         # Register markitdown-inspired parsers (built-in)
         self.register("word", WordParser())
+        self.register("legacy_doc", LegacyDocParser())
         self.register("powerpoint", PowerPointParser())
         self.register("excel", ExcelParser())
         self.register("epub", EPubParser())
@@ -74,6 +76,14 @@ class ParserRegistry:
         self.register("image", ImageParser())
         self.register("audio", AudioParser())
         self.register("video", VideoParser())
+
+        # Optional: Feishu/Lark document parser (requires lark-oapi)
+        try:
+            from openviking.parse.parsers.feishu import FeishuParser
+
+            self.register("feishu", FeishuParser())
+        except ImportError:
+            pass
 
     def register(self, name: str, parser: BaseParser) -> None:
         """

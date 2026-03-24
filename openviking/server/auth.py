@@ -7,8 +7,41 @@ from typing import Optional
 from fastapi import Depends, Header, Request
 
 from openviking.server.identity import RequestContext, ResolvedIdentity, Role
-from openviking_cli.exceptions import PermissionDeniedError, UnauthenticatedError
+from openviking_cli.exceptions import (
+    InvalidArgumentError,
+    PermissionDeniedError,
+    UnauthenticatedError,
+)
 from openviking_cli.session.user_id import UserIdentifier
+
+_ROOT_IMPLICIT_TENANT_ALLOWED_PATHS = {
+    "/api/v1/system/status",
+    "/api/v1/system/wait",
+    "/api/v1/debug/health",
+}
+_ROOT_IMPLICIT_TENANT_ALLOWED_PREFIXES = (
+    "/api/v1/admin",
+    "/api/v1/observer",
+)
+
+
+def _auth_mode(request: Request) -> str:
+    config = getattr(request.app.state, "config", None)
+    return getattr(config, "auth_mode", "api_key")
+
+
+def _root_request_requires_explicit_tenant(path: str) -> bool:
+    """Return True when a ROOT request targets tenant-scoped data APIs.
+
+    Root still needs access to admin and monitoring endpoints without a tenant
+    context. For data APIs, implicit fallback to default/default is misleading,
+    so callers must provide explicit account and user headers.
+    """
+    if path in _ROOT_IMPLICIT_TENANT_ALLOWED_PATHS:
+        return False
+    if path.startswith(_ROOT_IMPLICIT_TENANT_ALLOWED_PREFIXES):
+        return False
+    return True
 
 
 async def resolve_identity(
@@ -22,10 +55,24 @@ async def resolve_identity(
     """Resolve API key to identity.
 
     Strategy:
-    - If api_key_manager is None (dev mode): return ROOT with default identity
-    - Otherwise: resolve via APIKeyManager (root key first, then user key index)
+    - trusted mode: trust explicit account/user headers and return USER identity
+    - api_key mode without manager: dev mode, return implicit ROOT/default identity
+    - api_key mode with manager: resolve via APIKeyManager (root key first, then user key index)
     """
+    auth_mode = _auth_mode(request)
     api_key_manager = getattr(request.app.state, "api_key_manager", None)
+
+    if auth_mode == "trusted":
+        if not x_openviking_account or not x_openviking_user:
+            raise InvalidArgumentError(
+                "Trusted mode requests must include X-OpenViking-Account and X-OpenViking-User."
+            )
+        return ResolvedIdentity(
+            role=Role.USER,
+            account_id=x_openviking_account,
+            user_id=x_openviking_user,
+            agent_id=x_openviking_agent or "default",
+        )
 
     if api_key_manager is None:
         return ResolvedIdentity(
@@ -53,9 +100,32 @@ async def resolve_identity(
 
 
 async def get_request_context(
+    request: Request,
     identity: ResolvedIdentity = Depends(resolve_identity),
 ) -> RequestContext:
     """Convert ResolvedIdentity to RequestContext."""
+    path = request.url.path
+    auth_mode = _auth_mode(request)
+    api_key_manager = getattr(request.app.state, "api_key_manager", None)
+    if (
+        auth_mode == "api_key"
+        and api_key_manager is not None
+        and identity.role == Role.ROOT
+        and _root_request_requires_explicit_tenant(path)
+    ):
+        account_header = request.headers.get("X-OpenViking-Account")
+        user_header = request.headers.get("X-OpenViking-User")
+        if not account_header or not user_header:
+            raise InvalidArgumentError(
+                "ROOT requests to tenant-scoped APIs must include X-OpenViking-Account "
+                "and X-OpenViking-User headers. Use a user key for regular data access."
+            )
+
+    if auth_mode == "trusted" and not identity.account_id:
+        raise InvalidArgumentError("Trusted mode requests must include X-OpenViking-Account.")
+    if auth_mode == "trusted" and not identity.user_id:
+        raise InvalidArgumentError("Trusted mode requests must include X-OpenViking-User.")
+
     return RequestContext(
         user=UserIdentifier(
             identity.account_id or "default",
