@@ -83,6 +83,7 @@ class MemoryOperationsProtocol(Protocol):
     reasoning: str
     write_uris: List[Any]
     edit_uris: List[Any]
+    edit_overview_uris: List[Any]
     delete_uris: List[str]
 
     def is_empty(self) -> bool: ...
@@ -109,6 +110,10 @@ class StructuredMemoryOperations(BaseModel):
         default_factory=list,
         description="Edit operations with flat data format",
     )
+    edit_overview_uris: List[Any] = Field(
+        default_factory=list,
+        description="Edit operations for .overview.md files using memory_type",
+    )
     delete_uris: List[str] = Field(
         default_factory=list,
         description="Delete operations as URI strings",
@@ -119,6 +124,7 @@ class StructuredMemoryOperations(BaseModel):
         return (
             len(self.write_uris) == 0
             and len(self.edit_uris) == 0
+            and len(self.edit_overview_uris) == 0
             and len(self.delete_uris) == 0
         )
 

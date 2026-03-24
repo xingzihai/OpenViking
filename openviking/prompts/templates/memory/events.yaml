@@ -12,24 +12,19 @@ fields:
   - name: event_name
     type: string
     description: |
-      Event name used to uniquely identify this event memory.
-      Should be a specific event description such as "Decided to refactor memory system", "Started OpenViking project", "Completed Q3 review", etc.
-      Example: "[Action]: [Description]"
+      Event name in Chinese or English. If English, use lowercase with underscores, max 3 words.
     merge_op: immutable
 
   - name: event_time
     type: string
     description: |
-      Time when the event occurred, use absolute time format, do not use relative time (such as "today", "recently").
-      Can be empty if time is unknown.
-      Example: "2026-03-17"
+      Time when the event occurred, format “2026-03-17”. If unknown, use current time.
     merge_op: immutable
 
   - name: content
     type: string
     description: |
-      Markdown format.
-      Detailed event content describing "what happened".
-      Includes: decision content, reasons, results, background, timeline, etc.
-      Example: "During memory system design discussion, found that the original 6 categories had blurry boundaries. Especially states, lessons, insights often overlapped and were hard to distinguish. Decided to refactor to 5 categories, removing these three to make classification boundaries clearer."
+      Event content in Markdown format, describing “what happened”.
+      Includes: decision content, reasons, outcomes, context, timeline, etc.
+      Example: “In memory system design discussion, found original 6 category boundaries were unclear. Especially status, lessons learned, and insights often overlapped, making them difficult to distinguish. Decided to refactor to 5 categories, removing these three to make boundaries clearer.”
     merge_op: patch

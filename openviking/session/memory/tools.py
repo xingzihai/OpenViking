@@ -263,6 +263,9 @@ class MemorySearchTool(MemoryTool):
         try:
             query = kwargs.get("query", "")
             target_uri = kwargs.get("target_uri", "")
+            # If target_uri is empty, use default from ctx
+            if not target_uri and ctx and hasattr(ctx, 'default_search_uris') and ctx.default_search_uris:
+                target_uri = ctx.default_search_uris
             session_info = kwargs.get("session_info")
             limit = kwargs.get("limit", 10)
             score_threshold = kwargs.get("score_threshold")
@@ -280,6 +283,16 @@ class MemorySearchTool(MemoryTool):
         except Exception as e:
             logger.error(f"Failed to execute search: {e}")
             return {"error": str(e)}
+
+
+def _format_size(size_bytes: int) -> str:
+    """Format size in bytes to human readable format."""
+    if size_bytes >= 1024 * 1024:
+        return f"{size_bytes / (1024 * 1024):.1f}M"
+    elif size_bytes >= 1024:
+        return f"{size_bytes / 1024:.1f}K"
+    else:
+        return f"{size_bytes}B"
 
 
 class MemoryLsTool(MemoryTool):
@@ -322,10 +335,20 @@ class MemoryLsTool(MemoryTool):
                 node_limit=1000,
                 ctx=ctx,
             )
-            # ls -F style: files only (no directories), with type indicators
-            # For our use case, we just filter to files only
-            files_only = [f'{e.get("name")}' for e in entries if not e.get("isDir", False)]
-            return '\n'.join(files_only)
+            # Format: filename size (e.g., "file.md 1.2K")
+            result_lines = []
+            for e in entries:
+                if not e.get("isDir", False):
+                    # Extract name from entry or fallback to uri
+                    name = e.get("name", "")
+                    if not name:
+                        uri = e.get("uri", "")
+                        name = uri.rsplit("/", 1)[-1] if "/" in uri else uri
+                    size = e.get("size", 0)
+                    result_lines.append(f"{name} {_format_size(size)}")
+            if not result_lines:
+                return f"Directory is empty. You can write new files to create memory content."
+            return '\n'.join(result_lines)
         except Exception as e:
             logger.error(f"Failed to execute ls: {e}")
             return {"error": str(e)}
@@ -353,9 +376,13 @@ def list_tools() -> Dict[str, MemoryTool]:
     return MEMORY_TOOLS_REGISTRY.copy()
 
 
+# Tools exposed to LLM (not all registered tools are exposed)
+LLM_TOOLS = ["read", "search"]
+
+
 def get_tool_schemas() -> List[Dict[str, Any]]:
-    """Get all registered tools in OpenAI function schema format."""
-    return [tool.to_schema() for tool in MEMORY_TOOLS_REGISTRY.values()]
+    """Get tools exposed to LLM in OpenAI function schema format."""
+    return [tool.to_schema() for tool in MEMORY_TOOLS_REGISTRY.values() if tool.name in LLM_TOOLS]
 
 
 # Register default tools

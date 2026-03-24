@@ -133,6 +133,7 @@ class AsyncHTTPClient(BaseClient):
         self,
         url: Optional[str] = None,
         api_key: Optional[str] = None,
+        user_id: Optional[str] = None,
         agent_id: Optional[str] = None,
         timeout: float = 60.0,
     ):
@@ -141,6 +142,7 @@ class AsyncHTTPClient(BaseClient):
         Args:
             url: OpenViking Server URL. If not provided, reads from ovcli.conf.
             api_key: API key for authentication. If not provided, reads from ovcli.conf.
+            user_id: User identifier. If not provided, defaults to "default".
             agent_id: Agent identifier. If not provided, reads from ovcli.conf.
             timeout: HTTP request timeout in seconds. Default 60.0.
         """
@@ -153,6 +155,7 @@ class AsyncHTTPClient(BaseClient):
 
                 url = cfg.get("url")
                 api_key = api_key or cfg.get("api_key")
+                user_id = user_id or cfg.get("user_id")
                 agent_id = agent_id or cfg.get("agent_id")
                 if timeout == 60.0:  # only override default with config value
                     timeout = cfg.get("timeout", 60.0)
@@ -163,8 +166,9 @@ class AsyncHTTPClient(BaseClient):
             )
         self._url = url.rstrip("/")
         self._api_key = api_key
-        self._agent_id = agent_id
-        self._user = UserIdentifier.the_default_user()
+        self._user_id = user_id or "default"
+        self._agent_id = agent_id or "default"
+        self._user = UserIdentifier("default", self._user_id, self._agent_id)
         self._timeout = timeout
         self._http: Optional[httpx.AsyncClient] = None
         self._observer: Optional[_HTTPObserver] = None

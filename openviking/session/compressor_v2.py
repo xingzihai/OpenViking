@@ -8,6 +8,7 @@ Maintains the same interface as compressor.py for backward compatibility.
 """
 
 from dataclasses import dataclass
+import os
 from typing import Dict, List, Optional
 
 from openviking.core.context import Context
@@ -43,10 +44,13 @@ class SessionCompressorV2:
     ):
         """Initialize session compressor."""
         self.vikingdb = vikingdb
+        # Initialize registry once - used by both MemoryReAct and MemoryUpdater
+        self._registry = MemoryTypeRegistry()
+        schemas_dir = os.path.join(os.path.dirname(__file__), "..", "prompts", "templates", "memory")
+        self._registry.load_from_directory(schemas_dir)
         # Lazy initialize MemoryReAct - we need vlm and ctx
         self._react_orchestrator: Optional[MemoryReAct] = None
         self._memory_updater: Optional[MemoryUpdater] = None
-        self._registry: Optional[MemoryTypeRegistry] = None
 
     def _get_or_create_react(
         self, ctx: Optional[RequestContext] = None
@@ -63,6 +67,7 @@ class SessionCompressorV2:
             vlm=vlm,
             viking_fs=viking_fs,
             ctx=ctx,
+            registry=self._registry,
         )
         return self._react_orchestrator
 
@@ -71,7 +76,7 @@ class SessionCompressorV2:
         if self._memory_updater is not None:
             return self._memory_updater
 
-        self._memory_updater = MemoryUpdater()
+        self._memory_updater = MemoryUpdater(registry=self._registry)
         return self._memory_updater
 
     async def extract_long_term_memories(
@@ -113,7 +118,8 @@ class SessionCompressorV2:
 
             logger.info(
                 f"Generated memory operations: write={len(operations.write_uris)}, "
-                f"edit={len(operations.edit_uris)}, delete={len(operations.delete_uris)}"
+                f"edit={len(operations.edit_uris)}, edit_overview={len(operations.edit_overview_uris)}, "
+                f"delete={len(operations.delete_uris)}"
             )
 
             # Apply operations
@@ -127,14 +133,14 @@ class SessionCompressorV2:
                 f"errors={len(result.errors)}"
             )
 
-            # Return empty list - v2 directly writes to storage
-            # The count is used for stats in session.py
+            # Return list with dummy values to preserve count for stats in session.py
+            # v2 directly writes to storage, so we return None objects to maintain len() accuracy
             total_changes = (
                 len(result.written_uris)
                 + len(result.edited_uris)
                 + len(result.deleted_uris)
             )
-            return [] * total_changes
+            return [None] * total_changes
 
         except Exception as e:
             logger.error(f"Failed to extract memories with v2: {e}", exc_info=True)

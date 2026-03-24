@@ -18,7 +18,8 @@ from openviking.session.memory.utils import (
     flat_model_to_dict,
 )
 from openviking.session.memory.dataclass import MemoryField
-from openviking.session.memory.merge_op import MergeOpFactory
+from openviking.session.memory.merge_op import MergeOpFactory, PatchOp
+from openviking.session.memory.merge_op.base import FieldType, SearchReplaceBlock, StrPatch
 from openviking.session.memory.memory_type_registry import MemoryTypeRegistry
 from openviking.storage.viking_fs import get_viking_fs
 from openviking_cli.exceptions import NotFoundError
@@ -150,6 +151,15 @@ class MemoryUpdater:
                 logger.error(f"Failed to edit memory {uri}: {e}")
                 result.add_error(uri, e)
 
+        # Apply edit_overview operations
+        for op, uri in resolved_ops.edit_overview_operations:
+            try:
+                await self._apply_edit_overview(op, uri, ctx)
+                result.add_edited(uri)
+            except Exception as e:
+                logger.error(f"Failed to edit overview {uri}: {e}")
+                result.add_error(uri, e)
+
         # Apply delete operations
         for _uri_str, uri in resolved_ops.delete_operations:
             try:
@@ -264,6 +274,9 @@ class MemoryUpdater:
         # Re-serialize with updated content and metadata
         new_full_content = serialize_with_metadata(new_plain_content, metadata)
 
+        # Print diff of the edit
+        self._print_diff(uri, current_plain_content, new_plain_content)
+
         await viking_fs.write_file(uri, new_full_content, ctx=ctx)
         logger.debug(f"Edited memory: {uri}")
 
@@ -279,3 +292,103 @@ class MemoryUpdater:
         except NotFoundError:
             logger.warning(f"Memory not found for delete: {uri}")
             # Idempotent - deleting non-existent file succeeds
+
+    async def _apply_edit_overview(self, overview_model: Any, uri: str, ctx: RequestContext) -> None:
+        """
+        Apply edit operation for .overview.md file.
+
+        Args:
+            overview_model: Overview edit model with memory_type and overview fields
+            uri: URI of the .overview.md file
+            ctx: Request context
+        """
+        viking_fs = self._get_viking_fs()
+
+        # Get overview value from model
+        if hasattr(overview_model, 'overview'):
+            overview_value = overview_model.overview
+        elif isinstance(overview_model, dict):
+            overview_value = overview_model.get('overview')
+        else:
+            raise ValueError("overview_model must have overview field")
+
+        # Read current overview if exists
+        current_overview = ""
+        try:
+            current_overview = await viking_fs.read_file(uri, ctx=ctx) or ""
+        except NotFoundError:
+            # File doesn't exist yet, start with empty content
+            logger.debug(f"Overview file does not exist yet: {uri}")
+
+        # Apply patch or replace based on overview_value type
+        new_overview = current_overview
+        if overview_value is None:
+            # No overview provided, nothing to do
+            logger.debug(f"No overview value provided, skipping edit")
+            return
+        elif isinstance(overview_value, str):
+            # Direct string - replace
+            new_overview = overview_value
+        elif isinstance(overview_value, dict):
+            # Dict format - convert to StrPatch if needed
+            if 'blocks' in overview_value:
+                # Already in StrPatch format
+                blocks = [SearchReplaceBlock(**block) for block in overview_value['blocks']]
+                str_patch = StrPatch(blocks=blocks)
+            else:
+                # Unexpected format
+                raise ValueError(f"Invalid overview patch format: {overview_value}")
+
+            # Apply patch
+            patch_op = PatchOp(FieldType.STRING)
+            new_overview = patch_op.apply(current_overview, str_patch)
+        else:
+            # StrPatch object
+            patch_op = PatchOp(FieldType.STRING)
+            new_overview = patch_op.apply(current_overview, overview_value)
+
+        # Print diff of the edit
+        self._print_diff(uri, current_overview, new_overview)
+
+        # Write new overview
+        await viking_fs.write_file(uri, new_overview, ctx=ctx)
+        logger.debug(f"Edited overview: {uri}")
+
+    def _print_diff(self, uri: str, old_content: str, new_content: str) -> None:
+        """Print a diff of the memory edit using diff_match_patch."""
+        try:
+            from diff_match_patch import diff_match_patch
+            dmp = diff_match_patch()
+
+            # Compute character-level diff
+            diffs = dmp.diff_main(old_content, new_content)
+            dmp.diff_cleanupSemantic(diffs)
+
+            # Build formatted output
+            lines = []
+            lines.append(f"\n{'=' * 60}")
+            lines.append(f"MEMORY EDIT: {uri}")
+            lines.append(f"{'=' * 60}")
+
+            # ANSI styles
+            STYLE_DELETE = "\033[9m\033[31m"  # 删除线 + 红色
+            STYLE_INSERT = "\033[32m"          # 绿色
+            STYLE_RESET = "\033[0m"
+
+            for op, text in diffs:
+                if op == 0:  # Equal - 正常显示
+                    lines.append(text)
+                elif op == -1:  # Delete - 红色删除线
+                    lines.append(f"{STYLE_DELETE}{text}{STYLE_RESET}")
+                elif op == 1:  # Insert - 绿色高亮
+                    lines.append(f"{STYLE_INSERT}{text}{STYLE_RESET}")
+
+            lines.append(f"{'=' * 60}\n")
+
+            # Print directly
+            print("\n".join(lines))
+        except ImportError:
+            # Fallback: just show file name
+            logger.debug(f"diff_match_patch not available, skipping diff for {uri}")
+        except Exception as e:
+            logger.debug(f"Failed to print diff for {uri}: {e}")

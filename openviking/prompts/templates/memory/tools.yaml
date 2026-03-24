@@ -7,7 +7,7 @@ description: |
   Tool memories help the agent learn from experience and use tools more effectively over time.
 directory: "viking://agent/{agent_space}/memories/tools"
 filename_template: "{tool_name}.md"
-enabled: false
+enabled: true
 content_template: |
   Tool: {tool_name}
 
@@ -17,7 +17,7 @@ content_template: |
   Tool Memory Context:
   Based on {total_calls} historical calls:
   - Success rate: {success_rate}% ({success_count} successful, {fail_count} failed)
-  - Avg time: {avg_time}, Avg tokens: {avg_tokens}
+  - Avg time: {total_time_ms/total_calls}, Avg tokens: {total_tokens/total_calls}
   - Best for: {best_for}
   - Optimal params: {optimal_params}
   - Common failures: {common_failures}

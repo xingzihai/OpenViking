@@ -22,7 +22,7 @@ content_template: |
 
   {guidelines}
 
-enabled: false
+enabled: true
 fields:
   - name: skill_name
     type: string
