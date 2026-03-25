@@ -76,7 +76,7 @@ class SessionCompressorV2:
         if self._memory_updater is not None:
             return self._memory_updater
 
-        self._memory_updater = MemoryUpdater(registry=self._registry)
+        self._memory_updater = MemoryUpdater(registry=self._registry, vikingdb=self.vikingdb)
         return self._memory_updater
 
     async def extract_long_term_memories(

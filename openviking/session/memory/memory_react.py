@@ -426,6 +426,35 @@ How to use edit_overview_uris:
 - Provide overview field with the new content (string or patch format)
 - Example: {{"memory_type": "profile", "overview": "User profile overview..."}}
 
+## Overview Format Requirements (IMPORTANT)
+When generating overview content for edit_overview_uris, you MUST follow this structure:
+
+1. **Title (H1)**: Directory name (e.g., "# skills")
+2. **Brief Description (plain text paragraph, 50-150 words)**:
+   - Immediately following the title, without any H2 heading
+   - Explain what this directory is about
+   - Include core keywords for easy searching
+3. **Quick Navigation (H2)**: Decision Tree style
+   - Use "What do you want to learn?" or "What do you want to do?"
+   - Use → arrow to point to specific files
+   - Use file number references like [1], [2], [3]
+4. **Detailed Description (H2)**: One H3 subsection for each file
+
+Example:
+# skills
+
+Python async programming, Go concurrency, and System design skills. 适用于需要提升后端开发技能的工程师。
+
+## Quick Navigation
+- 想学异步编程 → [1]
+- 想学并发 → [2]
+
+## Detailed Description
+### [1] Python Async Programming
+...
+
+Total length: 400-800 words
+
 ## Final Output Format
 Outputs will be a complete JSON object with the following fields (Don't have '```json' appear and do not use '//' to omit content)
 
