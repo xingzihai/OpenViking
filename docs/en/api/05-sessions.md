@@ -190,7 +190,8 @@ This endpoint returns:
 Notes:
 - `latest_archive_overview` becomes an empty string when no completed archive exists, or when the latest overview does not fit in the token budget.
 - `latest_archive_id` is returned whenever a latest completed archive exists, even if `latest_archive_overview` is trimmed by budget.
-- `pre_archive_abstracts` is metadata for browsing archive history. It is not counted toward `estimatedTokens` or `stats.archiveTokens`.
+- `token_budget` is applied to the assembled payload after active `messages`: `latest_archive_overview` has higher priority than `pre_archive_abstracts`, and older abstracts are dropped first when budget is tight.
+- Only archive content that is actually returned is counted toward `estimatedTokens` and `stats.archiveTokens`.
 - Session commit generates an archive summary during Phase 2 for every non-empty archive attempt. Only archives with a completed `.done` marker are exposed here.
 
 **Parameters**
@@ -198,7 +199,7 @@ Notes:
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | session_id | str | Yes | - | Session ID |
-| token_budget | int | No | 128000 | Token budget for including `latest_archive_overview` |
+| token_budget | int | No | 128000 | Token budget for assembled archive payload after active `messages` |
 
 **Python SDK (Embedded / HTTP)**
 
@@ -262,14 +263,14 @@ ov session get-session-context a1b2c3d4 --token-budget 128000
         "created_at": "2026-03-24T09:10:20Z"
       }
     ],
-    "estimatedTokens": 142,
+    "estimatedTokens": 160,
     "stats": {
-      "totalArchives": 1,
-      "includedArchives": 1,
+      "totalArchives": 2,
+      "includedArchives": 2,
       "droppedArchives": 0,
       "failedArchives": 0,
       "activeTokens": 98,
-      "archiveTokens": 44
+      "archiveTokens": 62
     }
   }
 }

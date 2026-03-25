@@ -655,22 +655,42 @@ class Session:
         include_latest_overview = bool(
             latest_archive and latest_archive["overview_tokens"] <= remaining_budget
         )
-        archive_tokens = latest_archive["overview_tokens"] if include_latest_overview else 0
-        total_archives = (1 if latest_archive else 0) + len(context["pre_archive_abstracts"])
+        latest_archive_tokens = latest_archive["overview_tokens"] if include_latest_overview else 0
+        if include_latest_overview:
+            remaining_budget -= latest_archive_tokens
+
+        included_pre_archive_abstracts: List[Dict[str, str]] = []
+        pre_archive_tokens = 0
+        for item in context["pre_archive_abstracts"]:
+            if item["tokens"] > remaining_budget:
+                break
+            included_pre_archive_abstracts.append(
+                {"archive_id": item["archive_id"], "abstract": item["abstract"]}
+            )
+            pre_archive_tokens += item["tokens"]
+            remaining_budget -= item["tokens"]
+
+        archive_tokens = latest_archive_tokens + pre_archive_tokens
+        included_archives = (1 if include_latest_overview else 0) + len(
+            included_pre_archive_abstracts
+        )
+        dropped_archives = max(
+            0, context["total_archives"] - context["failed_archives"] - included_archives
+        )
 
         return {
             "latest_archive_overview": (
                 latest_archive["overview"] if include_latest_overview else ""
             ),
             "latest_archive_id": latest_archive["archive_id"] if latest_archive else "",
-            "pre_archive_abstracts": context["pre_archive_abstracts"],
+            "pre_archive_abstracts": included_pre_archive_abstracts,
             "messages": [m.to_dict() for m in merged_messages],
             "estimatedTokens": message_tokens + archive_tokens,
             "stats": {
-                "totalArchives": total_archives,
-                "includedArchives": 1 if include_latest_overview else 0,
-                "droppedArchives": 1 if latest_archive and not include_latest_overview else 0,
-                "failedArchives": 0,
+                "totalArchives": context["total_archives"],
+                "includedArchives": included_archives,
+                "droppedArchives": dropped_archives,
+                "failedArchives": context["failed_archives"],
                 "activeTokens": message_tokens,
                 "archiveTokens": archive_tokens,
             },
@@ -726,13 +746,16 @@ class Session:
 
     async def _collect_session_context_components(self) -> Dict[str, Any]:
         """Collect the latest summary archive and merged pending/live messages."""
+        completed_archives = await self._get_completed_archive_refs()
         latest_archive = None
-        pre_archive_abstracts: List[Dict[str, str]] = []
+        pre_archive_abstracts: List[Dict[str, Any]] = []
+        failed_archives = 0
 
-        for archive in await self._get_completed_archive_refs():
+        for archive in completed_archives:
             if latest_archive is None:
                 overview = await self._read_archive_overview(archive["archive_uri"])
                 if not overview:
+                    failed_archives += 1
                     continue
 
                 latest_archive = {
@@ -748,12 +771,20 @@ class Session:
             abstract = await self._read_archive_abstract(archive["archive_uri"])
             if abstract:
                 pre_archive_abstracts.append(
-                    {"archive_id": archive["archive_id"], "abstract": abstract}
+                    {
+                        "archive_id": archive["archive_id"],
+                        "abstract": abstract,
+                        "tokens": -(-len(abstract) // 4),
+                    }
                 )
+            else:
+                failed_archives += 1
 
         return {
             "latest_archive": latest_archive,
             "pre_archive_abstracts": pre_archive_abstracts,
+            "total_archives": len(completed_archives),
+            "failed_archives": failed_archives,
             "messages": await self._get_pending_archive_messages() + list(self._messages),
         }
 

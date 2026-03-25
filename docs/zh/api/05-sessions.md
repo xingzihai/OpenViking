@@ -190,7 +190,8 @@ openviking session get a1b2c3d4
 说明：
 - 没有可用 completed archive，或最新 overview 超出 token budget 时，`latest_archive_overview` 返回空字符串。
 - 只要存在最新 completed archive，就会返回 `latest_archive_id`；即使 `latest_archive_overview` 因 budget 被裁剪，这个 ID 仍然可用。
-- `pre_archive_abstracts` 仅用于浏览 archive 历史，不计入 `estimatedTokens` 或 `stats.archiveTokens`。
+- `token_budget` 会在 active `messages` 之后作用于 assembled archive payload：`latest_archive_overview` 优先级高于 `pre_archive_abstracts`，预算紧张时先淘汰最旧的 abstracts。
+- 只有最终实际返回的 archive 内容，才会计入 `estimatedTokens` 和 `stats.archiveTokens`。
 - 当前每次有消息的 session commit 都会在 Phase 2 生成 archive 摘要；只有带 `.done` 标记的 completed archive 才会被这里返回。
 
 **参数**
@@ -198,7 +199,7 @@ openviking session get a1b2c3d4
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | session_id | str | 是 | - | 会话 ID |
-| token_budget | int | 否 | 128000 | 是否纳入 `latest_archive_overview` 的 token 预算 |
+| token_budget | int | 否 | 128000 | active `messages` 之后留给 assembled archive payload 的 token 预算 |
 
 **Python SDK (Embedded / HTTP)**
 
@@ -262,14 +263,14 @@ ov session get-session-context a1b2c3d4 --token-budget 128000
         "created_at": "2026-03-24T09:10:20Z"
       }
     ],
-    "estimatedTokens": 142,
+    "estimatedTokens": 147,
     "stats": {
-      "totalArchives": 1,
-      "includedArchives": 1,
+      "totalArchives": 2,
+      "includedArchives": 2,
       "droppedArchives": 0,
       "failedArchives": 0,
       "activeTokens": 98,
-      "archiveTokens": 44
+      "archiveTokens": 49
     }
   }
 }
