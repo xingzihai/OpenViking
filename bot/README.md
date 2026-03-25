@@ -16,7 +16,12 @@ Vikingbot is deeply integrated with OpenViking, providing powerful knowledge man
 
 **Option 1: Install from PyPI (Simplest)**
 ```bash
+# Install dependencies (minimal)
 pip install "openviking[bot]"
+
+# Or install with optional features
+pip install "openviking[bot,bot-langfuse,bot-feishu]"
+
 ```
 
 **Option 2: Install from source (for development)**
@@ -50,7 +55,7 @@ source .venv/bin/activate  # macOS/Linux
 uv pip install -e ".[bot]"
 
 # Or install with optional features
-uv pip install -e ".[bot,bot-langfuse,bot-telegram]"
+uv pip install -e ".[bot,bot-langfuse,bot-feishu]"
 ```
 
 ### Optional Dependencies
