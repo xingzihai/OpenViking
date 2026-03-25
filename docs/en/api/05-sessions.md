@@ -178,44 +178,46 @@ openviking session get a1b2c3d4
 
 ### get_session_context()
 
-Get the full merged context used by session-aware retrieval.
+Get the assembled session context used by OpenClaw-style context rebuilding.
 
 This endpoint returns:
-- `latest_archive_overview`: the latest completed archive overview
-- `current_messages`: all incomplete archive messages after the latest completed archive, plus current live session messages
+- `summary_archive`: the latest completed archive summary, when it fits the token budget
+- `messages`: all incomplete archive messages after the latest completed archive, plus current live session messages
+- `stats`: token and inclusion stats for the returned context
 
 **Parameters**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | session_id | str | Yes | - | Session ID |
+| token_budget | int | No | 128000 | Token budget for including `summary_archive` |
 
 **Python SDK (Embedded / HTTP)**
 
 ```python
-context = await client.get_session_context("a1b2c3d4")
-print(context["latest_archive_overview"])
-print(len(context["current_messages"]))
+context = await client.get_session_context("a1b2c3d4", token_budget=128000)
+print(context["summary_archive"])
+print(len(context["messages"]))
 
 session = client.session("a1b2c3d4")
-context = await session.get_session_context()
+context = await session.get_session_context(token_budget=128000)
 ```
 
 **HTTP API**
 
 ```
-GET /api/v1/sessions/{session_id}/context
+GET /api/v1/sessions/{session_id}/context?token_budget=128000
 ```
 
 ```bash
-curl -X GET http://localhost:1933/api/v1/sessions/a1b2c3d4/context \
+curl -X GET "http://localhost:1933/api/v1/sessions/a1b2c3d4/context?token_budget=128000" \
   -H "X-API-Key: your-key"
 ```
 
 **CLI**
 
 ```bash
-ov session get-session-context a1b2c3d4
+ov session get-session-context a1b2c3d4 --token-budget 128000
 ```
 
 **Response**
@@ -224,8 +226,11 @@ ov session get-session-context a1b2c3d4
 {
   "status": "ok",
   "result": {
-    "latest_archive_overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
-    "current_messages": [
+    "summary_archive": {
+      "overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
+      "abstract": "User discussed deployment and auth setup."
+    },
+    "messages": [
       {
         "id": "msg_pending_1",
         "role": "user",
@@ -242,7 +247,16 @@ ov session get-session-context a1b2c3d4
         ],
         "created_at": "2026-03-24T09:10:20Z"
       }
-    ]
+    ],
+    "estimatedTokens": 142,
+    "stats": {
+      "totalArchives": 1,
+      "includedArchives": 1,
+      "droppedArchives": 0,
+      "failedArchives": 0,
+      "activeTokens": 98,
+      "archiveTokens": 44
+    }
   }
 }
 ```

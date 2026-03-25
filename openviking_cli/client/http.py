@@ -711,9 +711,14 @@ class AsyncHTTPClient(BaseClient):
         response = await self._http.get(f"/api/v1/sessions/{session_id}", params=params)
         return self._handle_response(response)
 
-    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
-        """Get full merged session context."""
-        response = await self._http.get(f"/api/v1/sessions/{session_id}/context")
+    async def get_session_context(
+        self, session_id: str, token_budget: int = 128_000
+    ) -> Dict[str, Any]:
+        """Get assembled session context."""
+        response = await self._http.get(
+            f"/api/v1/sessions/{session_id}/context",
+            params={"token_budget": token_budget},
+        )
         return self._handle_response(response)
 
     async def delete_session(self, session_id: str) -> None:

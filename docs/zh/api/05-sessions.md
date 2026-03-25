@@ -178,44 +178,46 @@ openviking session get a1b2c3d4
 
 ### get_session_context()
 
-获取供会话感知检索使用的完整合并上下文。
+获取供上下文组装使用的会话上下文。
 
 该接口返回：
-- `latest_archive_overview`：最新一个已完成归档的 overview
-- `current_messages`：最新已完成归档之后的所有未完成归档消息，再加上当前 live session 消息
+- `summary_archive`：最新一个已完成归档的摘要，在 token budget 足够时返回
+- `messages`：最新已完成归档之后的所有未完成归档消息，再加上当前 live session 消息
+- `stats`：返回结果对应的 token 与纳入统计
 
 **参数**
 
 | 参数 | 类型 | 必填 | 默认值 | 说明 |
 |------|------|------|--------|------|
 | session_id | str | 是 | - | 会话 ID |
+| token_budget | int | 否 | 128000 | 是否纳入 `summary_archive` 的 token 预算 |
 
 **Python SDK (Embedded / HTTP)**
 
 ```python
-context = await client.get_session_context("a1b2c3d4")
-print(context["latest_archive_overview"])
-print(len(context["current_messages"]))
+context = await client.get_session_context("a1b2c3d4", token_budget=128000)
+print(context["summary_archive"])
+print(len(context["messages"]))
 
 session = client.session("a1b2c3d4")
-context = await session.get_session_context()
+context = await session.get_session_context(token_budget=128000)
 ```
 
 **HTTP API**
 
 ```
-GET /api/v1/sessions/{session_id}/context
+GET /api/v1/sessions/{session_id}/context?token_budget=128000
 ```
 
 ```bash
-curl -X GET http://localhost:1933/api/v1/sessions/a1b2c3d4/context \
+curl -X GET "http://localhost:1933/api/v1/sessions/a1b2c3d4/context?token_budget=128000" \
   -H "X-API-Key: your-key"
 ```
 
 **CLI**
 
 ```bash
-ov session get-session-context a1b2c3d4
+ov session get-session-context a1b2c3d4 --token-budget 128000
 ```
 
 **响应**
@@ -224,8 +226,11 @@ ov session get-session-context a1b2c3d4
 {
   "status": "ok",
   "result": {
-    "latest_archive_overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
-    "current_messages": [
+    "summary_archive": {
+      "overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
+      "abstract": "User discussed deployment and auth setup."
+    },
+    "messages": [
       {
         "id": "msg_pending_1",
         "role": "user",
@@ -242,7 +247,16 @@ ov session get-session-context a1b2c3d4
         ],
         "created_at": "2026-03-24T09:10:20Z"
       }
-    ]
+    ],
+    "estimatedTokens": 142,
+    "stats": {
+      "totalArchives": 1,
+      "includedArchives": 1,
+      "droppedArchives": 0,
+      "failedArchives": 0,
+      "activeTokens": 98,
+      "archiveTokens": 44
+    }
   }
 }
 ```

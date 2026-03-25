@@ -340,11 +340,13 @@ class LocalClient(BaseClient):
         result["user"] = session.user.to_dict()
         return result
 
-    async def get_session_context(self, session_id: str) -> Dict[str, Any]:
-        """Get full merged session context."""
+    async def get_session_context(
+        self, session_id: str, token_budget: int = 128_000
+    ) -> Dict[str, Any]:
+        """Get assembled session context."""
         session = self._service.sessions.session(self._ctx, session_id)
         await session.load()
-        result = await session.get_session_context()
+        result = await session.get_session_context(token_budget=token_budget)
         return _to_jsonable(result)
 
     async def delete_session(self, session_id: str) -> None:

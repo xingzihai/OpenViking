@@ -101,8 +101,8 @@ async def test_sdk_session_lifecycle(http_client):
     assert info["session_id"] == session_id
 
     context = await client.get_session_context(session_id)
-    assert context["latest_archive_overview"] == ""
-    assert [m["parts"][0]["text"] for m in context["current_messages"]] == ["Hello from SDK"]
+    assert context["summary_archive"] is None
+    assert [m["parts"][0]["text"] for m in context["messages"]] == ["Hello from SDK"]
 
     # List
     sessions = await client.list_sessions()

@@ -461,6 +461,9 @@ enum SessionCommands {
     GetSessionContext {
         /// Session ID
         session_id: String,
+        /// Token budget for summary archive inclusion
+        #[arg(long = "token-budget", default_value = "128000")]
+        token_budget: i32,
     },
     /// Delete a session
     Delete {
@@ -937,10 +940,14 @@ async fn handle_session(cmd: SessionCommands, ctx: CliContext) -> Result<()> {
             commands::session::get_session(&client, &session_id, ctx.output_format, ctx.compact)
                 .await
         }
-        SessionCommands::GetSessionContext { session_id } => {
+        SessionCommands::GetSessionContext {
+            session_id,
+            token_budget,
+        } => {
             commands::session::get_session_context(
                 &client,
                 &session_id,
+                token_budget,
                 ctx.output_format,
                 ctx.compact,
             )

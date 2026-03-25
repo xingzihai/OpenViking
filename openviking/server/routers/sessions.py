@@ -138,19 +138,22 @@ async def get_session(
         )
     result = session.meta.to_dict()
     result["user"] = session.user.to_dict()
+    pending_tokens = sum(len(m.content) // 4 for m in session.messages)
+    result["pending_tokens"] = pending_tokens
     return Response(status="ok", result=result)
 
 
 @router.get("/{session_id}/context")
 async def get_session_context(
     session_id: str = Path(..., description="Session ID"),
+    token_budget: int = Query(128_000, description="Token budget for session context"),
     _ctx: RequestContext = Depends(get_request_context),
 ):
-    """Get full merged session context."""
+    """Get assembled session context."""
     service = get_service()
     session = service.sessions.session(_ctx, session_id)
     await session.load()
-    result = await session.get_session_context()
+    result = await session.get_session_context(token_budget=token_budget)
     return Response(status="ok", result=_to_jsonable(result))
 
 

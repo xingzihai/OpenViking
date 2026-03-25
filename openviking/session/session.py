@@ -301,7 +301,7 @@ class Session:
         # Update statistics
         if role == "user":
             self._stats.total_turns += 1
-        self._stats.total_tokens += len(msg.content) // 4
+        self._stats.total_tokens += msg.estimated_tokens
 
         self._append_to_jsonl(msg)
 
@@ -500,6 +500,16 @@ class Session:
                         content=summary,
                         ctx=self.ctx,
                     )
+                    await self._viking_fs.write_file(
+                        uri=f"{archive_uri}/.meta.json",
+                        content=json.dumps(
+                            {
+                                "overview_tokens": -(-len(summary) // 4),
+                                "abstract_tokens": -(-len(abstract) // 4),
+                            }
+                        ),
+                        ctx=self.ctx,
+                    )
 
                 # Memory extraction
                 if self._session_compressor:
@@ -634,51 +644,82 @@ class Session:
             logger.info(f"Updated active_count for {updated} contexts/skills")
         return updated
 
-    async def get_session_context(self) -> Dict[str, Any]:
-        """Get full merged session context.
+    async def get_session_context(self, token_budget: int = 128_000) -> Dict[str, Any]:
+        """Get assembled session context with the latest summary archive and merged messages."""
+        context = await self._collect_session_context_components()
+        merged_messages = context["messages"]
+        message_tokens = sum(m.estimated_tokens for m in merged_messages)
+        remaining_budget = max(0, token_budget - message_tokens)
 
-        Returns:
-            - latest_archive_overview: Latest completed archive overview, if any
-            - current_messages: Pending archive messages + current live messages (List[Message])
-        """
-        pending_messages = await self._get_pending_archive_messages()
-        latest_archive_overview = await self._get_latest_completed_archive_overview()
+        summary_archive = context["summary_archive"]
+        included_summary = (
+            {
+                "overview": summary_archive["overview"],
+                "abstract": summary_archive["abstract"],
+            }
+            if summary_archive and summary_archive["overview_tokens"] <= remaining_budget
+            else None
+        )
+        archive_tokens = summary_archive["overview_tokens"] if included_summary else 0
+        total_archives = 1 if summary_archive else 0
 
         return {
-            "latest_archive_overview": latest_archive_overview,
-            "current_messages": pending_messages + list(self._messages),
+            "summary_archive": included_summary,
+            "messages": [m.to_dict() for m in merged_messages],
+            "estimatedTokens": message_tokens + archive_tokens,
+            "stats": {
+                "totalArchives": total_archives,
+                "includedArchives": 1 if included_summary else 0,
+                "droppedArchives": 1 if summary_archive and not included_summary else 0,
+                "failedArchives": 0,
+                "activeTokens": message_tokens,
+                "archiveTokens": archive_tokens,
+            },
         }
 
     async def get_context_for_search(self, query: str, max_messages: int = 20) -> Dict[str, Any]:
         """Get session context for intent analysis."""
         del query  # Current query no longer affects historical archive selection.
 
-        context = await self.get_session_context()
-        current_messages = context["current_messages"]
+        context = await self._collect_session_context_components()
+        current_messages = context["messages"]
         if max_messages > 0:
             current_messages = current_messages[-max_messages:]
         else:
             current_messages = []
 
         return {
-            "latest_archive_overview": context["latest_archive_overview"],
+            "latest_archive_overview": (
+                context["summary_archive"]["overview"] if context["summary_archive"] else ""
+            ),
             "current_messages": current_messages,
         }
 
+    async def get_context_for_assemble(self, token_budget: int = 128_000) -> Dict[str, Any]:
+        """Backward-compatible alias for the assembled session context."""
+        return await self.get_session_context(token_budget=token_budget)
+
     # ============= Internal methods =============
 
-    async def _get_latest_completed_archive_overview(
+    async def _collect_session_context_components(self) -> Dict[str, Any]:
+        """Collect the latest summary archive and merged pending/live messages."""
+        return {
+            "summary_archive": await self._get_latest_completed_archive_summary(),
+            "messages": await self._get_pending_archive_messages() + list(self._messages),
+        }
+
+    async def _get_latest_completed_archive_summary(
         self,
         exclude_archive_uri: Optional[str] = None,
-    ) -> str:
-        """Return the newest completed archive overview, skipping incomplete archives."""
+    ) -> Optional[Dict[str, Any]]:
+        """Return the newest readable completed archive summary."""
         if not self._viking_fs or self.compression.compression_index <= 0:
-            return ""
+            return None
 
         try:
             history_items = await self._viking_fs.ls(f"{self._session_uri}/history", ctx=self.ctx)
         except Exception:
-            return ""
+            return None
 
         archive_names: List[str] = []
         for item in history_items:
@@ -699,16 +740,54 @@ class Session:
                 continue
             try:
                 await self._viking_fs.read_file(f"{archive_uri}/.done", ctx=self.ctx)
+            except Exception:
+                continue
+
+            try:
                 overview = await self._viking_fs.read_file(
                     f"{archive_uri}/.overview.md",
                     ctx=self.ctx,
                 )
-                if overview:
-                    return overview
             except Exception:
                 continue
 
-        return ""
+            if not overview:
+                continue
+
+            abstract = ""
+            try:
+                abstract = await self._viking_fs.read_file(
+                    f"{archive_uri}/.abstract.md",
+                    ctx=self.ctx,
+                )
+            except Exception:
+                pass
+
+            overview_tokens = -(-len(overview) // 4)
+            try:
+                meta_content = await self._viking_fs.read_file(
+                    f"{archive_uri}/.meta.json",
+                    ctx=self.ctx,
+                )
+                overview_tokens = json.loads(meta_content).get("overview_tokens", overview_tokens)
+            except Exception:
+                pass
+
+            return {
+                "overview": overview,
+                "abstract": abstract,
+                "overview_tokens": overview_tokens,
+            }
+
+        return None
+
+    async def _get_latest_completed_archive_overview(
+        self,
+        exclude_archive_uri: Optional[str] = None,
+    ) -> str:
+        """Return the newest completed archive overview, skipping incomplete archives."""
+        summary = await self._get_latest_completed_archive_summary(exclude_archive_uri)
+        return summary["overview"] if summary else ""
 
     async def _get_pending_archive_messages(self) -> List[Message]:
         """Return messages from incomplete archives newer than the latest completed archive."""

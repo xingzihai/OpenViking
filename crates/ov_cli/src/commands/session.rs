@@ -38,11 +38,17 @@ pub async fn get_session(
 pub async fn get_session_context(
     client: &HttpClient,
     session_id: &str,
+    token_budget: i32,
     output_format: OutputFormat,
     compact: bool,
 ) -> Result<()> {
     let path = format!("/api/v1/sessions/{}/context", url_encode(session_id));
-    let response: serde_json::Value = client.get(&path, &[]).await?;
+    let response: serde_json::Value = client
+        .get(
+            &path,
+            &[("token_budget".to_string(), token_budget.to_string())],
+        )
+        .await?;
     output_success(&response, output_format, compact);
     Ok(())
 }
