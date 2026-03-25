@@ -181,22 +181,32 @@ openviking session get a1b2c3d4
 Get the assembled session context used by OpenClaw-style context rebuilding.
 
 This endpoint returns:
-- `summary_archive`: the latest completed archive summary, when it fits the token budget
+- `latest_archive_overview`: the `overview` of the latest completed archive, when it fits the token budget
+- `latest_archive_id`: the ID of the latest completed archive, used for archive expansion
+- `pre_archive_abstracts`: lightweight history entries for older completed archives, each containing `archive_id` and `abstract`
 - `messages`: all incomplete archive messages after the latest completed archive, plus current live session messages
 - `stats`: token and inclusion stats for the returned context
+
+Notes:
+- `latest_archive_overview` becomes an empty string when no completed archive exists, or when the latest overview does not fit in the token budget.
+- `latest_archive_id` is returned whenever a latest completed archive exists, even if `latest_archive_overview` is trimmed by budget.
+- `pre_archive_abstracts` is metadata for browsing archive history. It is not counted toward `estimatedTokens` or `stats.archiveTokens`.
+- Session commit generates an archive summary during Phase 2 for every non-empty archive attempt. Only archives with a completed `.done` marker are exposed here.
 
 **Parameters**
 
 | Parameter | Type | Required | Default | Description |
 |-----------|------|----------|---------|-------------|
 | session_id | str | Yes | - | Session ID |
-| token_budget | int | No | 128000 | Token budget for including `summary_archive` |
+| token_budget | int | No | 128000 | Token budget for including `latest_archive_overview` |
 
 **Python SDK (Embedded / HTTP)**
 
 ```python
 context = await client.get_session_context("a1b2c3d4", token_budget=128000)
-print(context["summary_archive"])
+print(context["latest_archive_overview"])
+print(context["latest_archive_id"])
+print(context["pre_archive_abstracts"])
 print(len(context["messages"]))
 
 session = client.session("a1b2c3d4")
@@ -226,10 +236,14 @@ ov session get-session-context a1b2c3d4 --token-budget 128000
 {
   "status": "ok",
   "result": {
-    "summary_archive": {
-      "overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
-      "abstract": "User discussed deployment and auth setup."
-    },
+    "latest_archive_overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
+    "latest_archive_id": "archive_002",
+    "pre_archive_abstracts": [
+      {
+        "archive_id": "archive_001",
+        "abstract": "User previously discussed repository bootstrap and authentication setup."
+      }
+    ],
     "messages": [
       {
         "id": "msg_pending_1",
@@ -260,6 +274,83 @@ ov session get-session-context a1b2c3d4 --token-budget 128000
   }
 }
 ```
+
+---
+
+### get_session_archive() / ArchiveExpand
+
+Get the full contents of one completed archive for a session.
+
+This endpoint is intended to work with `latest_archive_id` and `pre_archive_abstracts[*].archive_id` returned by `get_session_context()`.
+
+This endpoint returns:
+- `archive_id`: the archive ID that was expanded
+- `abstract`: the lightweight summary for the archive
+- `overview`: the full archive overview
+- `messages`: the archived transcript for that archive
+
+**Parameters**
+
+| Parameter | Type | Required | Default | Description |
+|-----------|------|----------|---------|-------------|
+| session_id | str | Yes | - | Session ID |
+| archive_id | str | Yes | - | Archive ID such as `archive_002` |
+
+**Python SDK (Embedded / HTTP)**
+
+```python
+archive = await client.get_session_archive("a1b2c3d4", "archive_002")
+print(archive["archive_id"])
+print(archive["overview"])
+print(len(archive["messages"]))
+
+session = client.session("a1b2c3d4")
+archive = await session.get_archive("archive_002")
+```
+
+**HTTP API**
+
+```
+GET /api/v1/sessions/{session_id}/archives/{archive_id}
+```
+
+```bash
+curl -X GET "http://localhost:1933/api/v1/sessions/a1b2c3d4/archives/archive_002" \
+  -H "X-API-Key: your-key"
+```
+
+**Response**
+
+```json
+{
+  "status": "ok",
+  "result": {
+    "archive_id": "archive_002",
+    "abstract": "User discussed deployment and auth setup.",
+    "overview": "# Session Summary\n\n**Overview**: User discussed deployment and auth setup.",
+    "messages": [
+      {
+        "id": "msg_archive_1",
+        "role": "user",
+        "parts": [
+          {"type": "text", "text": "How should I deploy this service?"}
+        ],
+        "created_at": "2026-03-24T08:55:01Z"
+      },
+      {
+        "id": "msg_archive_2",
+        "role": "assistant",
+        "parts": [
+          {"type": "text", "text": "Use the staged deployment flow and verify auth first."}
+        ],
+        "created_at": "2026-03-24T08:55:18Z"
+      }
+    ]
+  }
+}
+```
+
+If the archive does not exist, is incomplete, or does not belong to the session, the API returns `404`.
 
 ---
 
