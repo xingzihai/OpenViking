@@ -7,6 +7,7 @@ import base64
 import json
 import logging
 import time
+from collections import OrderedDict
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 
@@ -16,8 +17,32 @@ from ..base import VLMResponse, ToolCall
 logger = logging.getLogger(__name__)
 
 
+class LRUCache:
+    """Simple LRU cache implementation."""
+
+    def __init__(self, maxsize: int = 100):
+        self._cache = OrderedDict()
+        self._maxsize = maxsize
+
+    def get(self, key: str) -> Optional[str]:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+            return self._cache[key]
+        return None
+
+    def set(self, key: str, value: str) -> None:
+        if key in self._cache:
+            self._cache.move_to_end(key)
+        self._cache[key] = value
+        if len(self._cache) > self._maxsize:
+            self._cache.popitem(last=False)
+
+    def clear(self) -> None:
+        self._cache.clear()
+
+
 class VolcEngineVLM(OpenAIVLM):
-    """VolcEngine VLM backend"""
+    """VolcEngine VLM backend with prompt caching support."""
 
     def __init__(self, config: Dict[str, Any]):
         super().__init__(config)
@@ -26,11 +51,97 @@ class VolcEngineVLM(OpenAIVLM):
         # Ensure provider type is correct
         self.provider = "volcengine"
 
+        # Prompt caching: message content -> response_id
+        self._response_cache = LRUCache(maxsize=100)
+
         # VolcEngine-specific defaults
         if not self.api_base:
             self.api_base = "https://ark.cn-beijing.volces.com/api/v3"
         if not self.model:
             self.model = "doubao-seed-2-0-pro-260215"
+
+    def _find_cache_breakpoints(self, messages: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Find cache_control breakpoints in messages.
+
+        Returns:
+            {
+                "prefix": [...],  # messages before the last breakpoint
+                "breakpoint_index": 2,  # index of last breakpoint message
+                "current": [...]  # all messages including last breakpoint
+            }
+            or None if no breakpoints found.
+        """
+        breakpoint_indices = []
+
+        for i, msg in enumerate(messages):
+            role = msg.get("role")
+            content = msg.get("content", "")
+
+            # Check cache_control in message
+            cache_control = msg.get("cache_control")
+            if cache_control and isinstance(cache_control, dict):
+                breakpoint_indices.append(i)
+                continue
+
+            # Also check inside content blocks (for Claude-style content arrays)
+            if isinstance(content, list):
+                for block in content:
+                    if isinstance(block, dict) and block.get("cache_control"):
+                        if i not in breakpoint_indices:
+                            breakpoint_indices.append(i)
+                        break
+
+        if not breakpoint_indices:
+            return None
+
+        # Use the last breakpoint
+        last_breakpoint_idx = breakpoint_indices[-1]
+
+        return {
+            "prefix": messages[:last_breakpoint_idx],
+            "breakpoint_index": last_breakpoint_idx,
+            "current": messages[:last_breakpoint_idx + 1],
+        }
+
+    def _serialize_messages(self, messages: List[Dict[str, Any]]) -> str:
+        """Serialize messages to a string for use as cache key."""
+        # Extract role and content (skip cache_control in key)
+        key_parts = []
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+
+            # Handle content as list (Claude-style)
+            if isinstance(content, list):
+                text_parts = []
+                for block in content:
+                    if isinstance(block, dict):
+                        text = block.get("text", "")
+                        if text:
+                            text_parts.append(text)
+                content = " ".join(text_parts)
+
+            key_parts.append(f"{role}:{content}")
+
+        return "|".join(key_parts)
+
+    def _get_cached_response_id(self, messages: List[Dict[str, Any]]) -> Optional[str]:
+        """Get cached response_id for the given messages."""
+        breakpoints = self._find_cache_breakpoints(messages)
+        if not breakpoints:
+            return None
+
+        cache_key = self._serialize_messages(breakpoints["prefix"])
+        return self._response_cache.get(cache_key)
+
+    def _cache_response_id(self, messages: List[Dict[str, Any]], response_id: str) -> None:
+        """Cache response_id for the given messages."""
+        breakpoints = self._find_cache_breakpoints(messages)
+        if not breakpoints:
+            return
+
+        cache_key = self._serialize_messages(breakpoints["current"])
+        self._response_cache.set(cache_key, response_id)
 
     def get_client(self):
         """Get sync client"""
@@ -112,12 +223,15 @@ class VolcEngineVLM(OpenAIVLM):
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, VLMResponse]:
-        """Get text completion"""
+        """Get text completion with prompt caching support."""
         client = self.get_client()
         if messages:
             kwargs_messages = messages
         else:
             kwargs_messages = [{"role": "user", "content": prompt}]
+
+        # Check for cached response_id
+        previous_response_id = self._get_cached_response_id(kwargs_messages)
 
         kwargs = {
             "model": self.model or "doubao-seed-2-0-pro-260215",
@@ -132,10 +246,21 @@ class VolcEngineVLM(OpenAIVLM):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
 
+        # Use previous_response_id for prompt caching if available
+        if previous_response_id:
+            kwargs["previous_response_id"] = previous_response_id
+            logger.info(f"[VolcEngineVLM] Using cached response_id: {previous_response_id}")
+
         t0 = time.perf_counter()
         response = client.chat.completions.create(**kwargs)
         elapsed = time.perf_counter() - t0
         self._update_token_usage_from_response(response, duration_seconds=elapsed)
+
+        # Cache the response_id for future requests
+        if hasattr(response, 'id') and response.id:
+            self._cache_response_id(kwargs_messages, response.id)
+            logger.info(f"[VolcEngineVLM] Cached response_id: {response.id}")
+
         return self._build_vlm_response(response, has_tools=bool(tools))
 
     async def get_completion_async(
@@ -147,12 +272,15 @@ class VolcEngineVLM(OpenAIVLM):
         tool_choice: Optional[str] = None,
         messages: Optional[List[Dict[str, Any]]] = None,
     ) -> Union[str, VLMResponse]:
-        """Get text completion asynchronously"""
+        """Get text completion asynchronously with prompt caching support."""
         client = self.get_async_client()
         if messages:
             kwargs_messages = messages
         else:
             kwargs_messages = [{"role": "user", "content": prompt}]
+
+        # Check for cached response_id
+        previous_response_id = self._get_cached_response_id(kwargs_messages)
 
         kwargs = {
             "model": self.model or "doubao-seed-2-0-pro-260215",
@@ -167,6 +295,11 @@ class VolcEngineVLM(OpenAIVLM):
             kwargs["tools"] = tools
             kwargs["tool_choice"] = tool_choice or "auto"
 
+        # Use previous_response_id for prompt caching if available
+        if previous_response_id:
+            kwargs["previous_response_id"] = previous_response_id
+            logger.info(f"[VolcEngineVLM] Using cached response_id: {previous_response_id}")
+
         last_error = None
         for attempt in range(max_retries + 1):
             try:
@@ -176,6 +309,12 @@ class VolcEngineVLM(OpenAIVLM):
                 self._update_token_usage_from_response(
                     response, duration_seconds=elapsed,
                 )
+
+                # Cache the response_id for future requests
+                if hasattr(response, 'id') and response.id:
+                    self._cache_response_id(kwargs_messages, response.id)
+                    logger.info(f"[VolcEngineVLM] Cached response_id: {response.id}")
+
                 return self._build_vlm_response(response, has_tools=bool(tools))
             except Exception as e:
                 last_error = e
