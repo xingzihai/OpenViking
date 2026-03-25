@@ -276,10 +276,14 @@ class VLMFactory:
 
             return OpenAIVLM(config)
 
-        else:
-            from .backends.litellm_vlm import LiteLLMVLMProvider
+        if provider == "litellm":
+            raise ValueError(
+                "VLM provider 'litellm' has been temporarily disabled for security reasons"
+            )
 
-            return LiteLLMVLMProvider(config)
+        raise ValueError(
+            f"Unsupported VLM provider: '{provider}'. Supported providers: volcengine, openai, azure"
+        )
 
     @staticmethod
     def get_available_providers() -> List[str]:
