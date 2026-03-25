@@ -19,23 +19,27 @@ import (
 
 // S3Client wraps AWS S3 client with helper methods
 type S3Client struct {
-	client *s3.Client
-	bucket string
-	region string // AWS region
-	prefix string // Optional prefix for all keys
+	client                  *s3.Client
+	bucket                  string
+	region                  string // AWS region
+	prefix                  string // Optional prefix for all keys
+	nonEmptyDirectoryMarker bool
 }
 
 // S3Config holds S3 client configuration
 type S3Config struct {
-	Region          string
-	Bucket          string
-	AccessKeyID     string
-	SecretAccessKey string
-	Endpoint        string // Optional custom endpoint (for S3-compatible services)
-	Prefix          string // Optional prefix for all keys
-	DisableSSL      bool   // For testing with local S3
-	UsePathStyle    bool  // Whether to use path-style addressing (true) or virtual-host-style (false)
+	Region                  string
+	Bucket                  string
+	AccessKeyID             string
+	SecretAccessKey         string
+	Endpoint                string // Optional custom endpoint (for S3-compatible services)
+	Prefix                  string // Optional prefix for all keys
+	DisableSSL              bool   // For testing with local S3
+	UsePathStyle            bool   // Whether to use path-style addressing (true) or virtual-host-style (false)
+	NonEmptyDirectoryMarker bool   // Use a non-empty payload for directory markers on backends that reject zero-byte uploads
 }
+
+var nonEmptyDirectoryMarkerPayload = []byte{'\n'}
 
 // NewS3Client creates a new S3 client
 func NewS3Client(cfg S3Config) (*S3Client, error) {
@@ -70,7 +74,7 @@ func NewS3Client(cfg S3Config) (*S3Client, error) {
 			o.BaseEndpoint = aws.String(cfg.Endpoint)
 			// true represent UsePathStyle for MinIO and some S3-compatible services
 			// false represent VirtualHostStyle for TOS  and some S3-compatible services
-			o.UsePathStyle = cfg.UsePathStyle 
+			o.UsePathStyle = cfg.UsePathStyle
 		})
 	}
 
@@ -90,10 +94,11 @@ func NewS3Client(cfg S3Config) (*S3Client, error) {
 	prefix := strings.Trim(cfg.Prefix, "/")
 
 	return &S3Client{
-		client: client,
-		bucket: cfg.Bucket,
-		region: cfg.Region,
-		prefix: prefix,
+		client:                  client,
+		bucket:                  cfg.Bucket,
+		region:                  cfg.Region,
+		prefix:                  prefix,
+		nonEmptyDirectoryMarker: cfg.NonEmptyDirectoryMarker,
 	}, nil
 }
 
@@ -308,18 +313,23 @@ func (c *S3Client) ListObjects(ctx context.Context, path string) ([]S3Object, er
 	return objects, nil
 }
 
-// CreateDirectory creates a directory marker in S3
-// S3 doesn't have real directories, but we create empty objects ending with "/"
+// CreateDirectory creates a directory marker in S3.
+// S3 doesn't have real directories; they are represented by object keys ending with "/".
 func (c *S3Client) CreateDirectory(ctx context.Context, path string) error {
 	key := c.buildKey(path)
 	if !strings.HasSuffix(key, "/") {
 		key += "/"
 	}
 
+	payload := []byte{}
+	if c.nonEmptyDirectoryMarker {
+		payload = nonEmptyDirectoryMarkerPayload
+	}
+
 	_, err := c.client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(key),
-		Body:   bytes.NewReader([]byte{}),
+		Body:   bytes.NewReader(payload),
 	})
 	if err != nil {
 		return fmt.Errorf("failed to create directory %s: %w", key, err)

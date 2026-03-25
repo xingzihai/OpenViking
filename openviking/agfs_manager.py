@@ -178,6 +178,7 @@ class AGFSManager:
                     "prefix": self.s3_config.prefix,
                     "disable_ssl": not self.s3_config.use_ssl,
                     "use_path_style": self.s3_config.use_path_style,
+                    "nonempty_directory_marker": self.s3_config.nonempty_directory_marker,
                 },
             }
         elif self.backend == "memory":

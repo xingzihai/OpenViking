@@ -46,6 +46,11 @@ class S3Config(BaseModel):
         description="true represent UsePathStyle for MinIO and some S3-compatible services; false represent VirtualHostStyle for TOS  and some S3-compatible services.",
     )
 
+    nonempty_directory_marker: bool = Field(
+        default=False,
+        description="Write directory markers with a non-empty payload. Enable this for S3-compatible backends such as TOS that reject zero-byte directory marker uploads.",
+    )
+
     model_config = {"extra": "forbid"}
 
     def validate_config(self):

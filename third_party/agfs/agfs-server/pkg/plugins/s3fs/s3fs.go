@@ -605,14 +605,15 @@ func (p *S3FSPlugin) Initialize(config map[string]interface{}) error {
 
 	// Parse S3 configuration
 	cfg := S3Config{
-		Region:          getStringConfig(config, "region", "us-east-1"),
-		Bucket:          getStringConfig(config, "bucket", ""),
-		AccessKeyID:     getStringConfig(config, "access_key_id", ""),
-		SecretAccessKey: getStringConfig(config, "secret_access_key", ""),
-		Endpoint:        getStringConfig(config, "endpoint", ""),
-		Prefix:          getStringConfig(config, "prefix", ""),
-		DisableSSL:      getBoolConfig(config, "disable_ssl", false),
-		UsePathStyle:    getBoolConfig(config, "use_path_style", true),
+		Region:                  getStringConfig(config, "region", "us-east-1"),
+		Bucket:                  getStringConfig(config, "bucket", ""),
+		AccessKeyID:             getStringConfig(config, "access_key_id", ""),
+		SecretAccessKey:         getStringConfig(config, "secret_access_key", ""),
+		Endpoint:                getStringConfig(config, "endpoint", ""),
+		Prefix:                  getStringConfig(config, "prefix", ""),
+		DisableSSL:              getBoolConfig(config, "disable_ssl", false),
+		UsePathStyle:            getBoolConfig(config, "use_path_style", true),
+		NonEmptyDirectoryMarker: getBoolConfig(config, "nonempty_directory_marker", false),
 	}
 
 	if cfg.Bucket == "" {
