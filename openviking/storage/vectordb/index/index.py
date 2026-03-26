@@ -327,7 +327,7 @@ class IIndex(ABC):
 
     def invalidate_cache(self) -> None:
         """Invalidate the query cache for this index.
-        
+
         Should be called when the underlying data is modified.
         """
         pass
@@ -588,7 +588,7 @@ class Index:
 
     def invalidate_cache(self) -> None:
         """Invalidate the query cache for this index.
-        
+
         Should be called when the underlying data is modified.
         """
         if self.__index is not None:

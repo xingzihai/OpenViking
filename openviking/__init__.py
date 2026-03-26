@@ -8,40 +8,40 @@ It provides a filesystem paradigm for unified context management, enabling devel
 to build an Agent's brain just like managing local files.
 
 Key Features:
-    - Filesystem Management Paradigm: Unified context management of memories, 
+    - Filesystem Management Paradigm: Unified context management of memories,
       resources, and skills based on a filesystem paradigm.
     - Tiered Context Loading: L0/L1/L2 three-tier structure, loaded on demand.
-    - Directory Recursive Retrieval: Native filesystem retrieval methods with 
+    - Directory Recursive Retrieval: Native filesystem retrieval methods with
       directory positioning and semantic search.
-    - Visualized Retrieval Trajectory: Supports visualization of directory 
+    - Visualized Retrieval Trajectory: Supports visualization of directory
       retrieval trajectories.
-    - Automatic Session Management: Automatically compresses content and extracts 
+    - Automatic Session Management: Automatically compresses content and extracts
       long-term memory.
 
 Basic Usage:
     >>> import openviking
-    >>> 
+    >>>
     >>> # Initialize client (embedded mode)
     >>> client = openviking.SyncOpenViking()
     >>> client.initialize()
-    >>> 
+    >>>
     >>> # Add a resource
     >>> client.add_resource("https://github.com/example/repo", wait=True)
-    >>> 
+    >>>
     >>> # Search for context
     >>> results = client.find("what is openviking")
-    >>> 
+    >>>
     >>> # Create a session for conversation
     >>> session = client.session()
     >>> client.add_message(session.session_id, "user", "Hello!")
     >>> client.commit_session(session.session_id)
-    >>> 
+    >>>
     >>> # Clean up
     >>> client.close()
 
 For async usage:
     >>> from openviking import AsyncOpenViking
-    >>> 
+    >>>
     >>> async def main():
     ...     client = AsyncOpenViking()
     ...     await client.initialize()
@@ -50,10 +50,10 @@ For async usage:
 
 For HTTP mode (connecting to a remote server):
     >>> from openviking import AsyncHTTPClient, SyncHTTPClient
-    >>> 
+    >>>
     >>> # Async HTTP client
     >>> client = AsyncHTTPClient(url="http://localhost:1933")
-    >>> 
+    >>>
     >>> # Sync HTTP client
     >>> client = SyncHTTPClient(url="http://localhost:1933")
 

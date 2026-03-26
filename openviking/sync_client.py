@@ -13,25 +13,25 @@ already using asyncio, AsyncOpenViking is recommended.
 
 Example:
     >>> from openviking import SyncOpenViking
-    >>> 
+    >>>
     >>> # Create and initialize client
     >>> client = SyncOpenViking()
     >>> client.initialize()
-    >>> 
+    >>>
     >>> # Add a resource
     >>> result = client.add_resource(
     ...     "https://github.com/example/repo",
     ...     wait=True
     ... )
-    >>> 
+    >>>
     >>> # Search for context
     >>> results = client.find("what is openviking")
-    >>> 
+    >>>
     >>> # Create a session
     >>> session = client.session()
     >>> client.add_message(session.session_id, "user", "Hello!")
     >>> client.commit_session(session.session_id)
-    >>> 
+    >>>
     >>> # Clean up
     >>> client.close()
 
@@ -80,40 +80,40 @@ class SyncOpenViking:
 
     Examples:
         Basic usage:
-        
+
         >>> from openviking import SyncOpenViking
-        >>> 
+        >>>
         >>> client = SyncOpenViking()
         >>> client.initialize()
-        >>> 
+        >>>
         >>> # Add a resource and wait for processing
         >>> result = client.add_resource(
         ...     "https://github.com/volcengine/OpenViking",
         ...     parent="viking://resources/",
         ...     wait=True
         ... )
-        >>> 
+        >>>
         >>> # Search for context
         >>> results = client.find("what is openviking")
         >>> print(results)
-        >>> 
+        >>>
         >>> client.close()
 
         Session-based conversation:
-        
+
         >>> client = SyncOpenViking()
         >>> client.initialize()
-        >>> 
+        >>>
         >>> # Create a session
         >>> session = client.session()
-        >>> 
+        >>>
         >>> # Add conversation messages
         >>> client.add_message(session.session_id, "user", "I love Python!")
         >>> client.add_message(session.session_id, "assistant", "Python is great!")
-        >>> 
+        >>>
         >>> # Commit session to extract memories
         >>> client.commit_session(session.session_id)
-        >>> 
+        >>>
         >>> client.close()
 
     See Also:
@@ -137,7 +137,7 @@ class SyncOpenViking:
         Example:
             >>> # Use default configuration
             >>> client = SyncOpenViking()
-            >>> 
+            >>>
             >>> # Specify custom storage path
             >>> client = SyncOpenViking(path="/data/openviking_workspace")
 
@@ -188,7 +188,7 @@ class SyncOpenViking:
             >>> # Create a new session
             >>> session = client.session()
             >>> print(session.session_id)
-            >>> 
+            >>>
             >>> # Load an existing session
             >>> session = client.session(session_id="existing-id", must_exist=True)
 
@@ -274,7 +274,7 @@ class SyncOpenViking:
             >>> # Add messages to session
             >>> client.add_message(session_id, "user", "I prefer Python")
             >>> client.add_message(session_id, "assistant", "Noted!")
-            >>> 
+            >>>
             >>> # Commit to extract memories
             >>> result = client.commit_session(session_id)
             >>> print(f"Extracted {result['memories_extracted']['total']} memories")
@@ -335,7 +335,7 @@ class SyncOpenViking:
             >>> result = client.add_resource(
             ...     "https://github.com/volcengine/OpenViking"
             ... )
-            >>> 
+            >>>
             >>> # Add a local directory and wait
             >>> result = client.add_resource(
             ...     "/path/to/docs",
@@ -535,7 +535,7 @@ class SyncOpenViking:
         Example:
             >>> # Read entire file
             >>> content = client.read("viking://resources/docs/api.md")
-            >>> 
+            >>>
             >>> # Read first 100 lines
             >>> content = client.read("viking://resources/docs/api.md", limit=100)
 
@@ -568,7 +568,7 @@ class SyncOpenViking:
             >>> entries = client.ls("viking://resources/")
             >>> for entry in entries:
             ...     print(f"{entry['name']}: {entry['type']}")
-            >>> 
+            >>>
             >>> # Recursive listing
             >>> entries = client.ls("viking://resources/", recursive=True)
 

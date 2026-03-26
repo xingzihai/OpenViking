@@ -209,7 +209,9 @@ class LocalIndex(IIndex):
     DEFAULT_CACHE_TTL_SECONDS = 300.0  # 5 minutes
     DEFAULT_BATCH_SEARCH_THREADS = 4
 
-    def __init__(self, index_path_or_json: str, meta: Any, cache_config: Optional[Dict[str, Any]] = None):
+    def __init__(
+        self, index_path_or_json: str, meta: Any, cache_config: Optional[Dict[str, Any]] = None
+    ):
         """Initialize a local index instance.
 
         Args:
@@ -227,7 +229,7 @@ class LocalIndex(IIndex):
         )
         self.meta = meta
         self.field_type_converter = DataProcessor(self.meta.collection_meta.fields_dict)
-        
+
         # Initialize query cache
         cache_config = cache_config or {}
         self.query_cache = QueryCache(
@@ -292,17 +294,16 @@ class LocalIndex(IIndex):
             # Convert filters for index
             if self.field_type_converter and filters is not None:
                 filters = self.field_type_converter.convert_filter_for_index(filters)
-            
+
             result = self.engine_proxy.search(
                 query_vector, limit, filters, sparse_raw_terms, sparse_values
             )
-            
+
             # Cache the result
             self.query_cache.put(
-                query_vector, limit, filters, sparse_raw_terms, sparse_values,
-                result[0], result[1]
+                query_vector, limit, filters, sparse_raw_terms, sparse_values, result[0], result[1]
             )
-            
+
             return result
         return [], []
 
@@ -350,19 +351,21 @@ class LocalIndex(IIndex):
             sparse_raw_terms_list = [None] * len(query_vectors)
         if sparse_values_list is None:
             sparse_values_list = [None] * len(query_vectors)
-        
+
         if num_threads is None:
             num_threads = self.DEFAULT_BATCH_SEARCH_THREADS
 
         results: List[Optional[Tuple[List[int], List[float]]]] = [None] * len(query_vectors)
         uncached_indices: List[int] = []
-        uncached_queries: List[Tuple[int, List[float], Optional[List[str]], Optional[List[float]]]] = []
+        uncached_queries: List[
+            Tuple[int, List[float], Optional[List[str]], Optional[List[float]]]
+        ] = []
 
         # Check cache for all queries
         for i, query_vector in enumerate(query_vectors):
             sparse_terms = sparse_raw_terms_list[i]
             sparse_values = sparse_values_list[i]
-            
+
             cached_result = self.query_cache.get(
                 query_vector, limit, filters, sparse_terms, sparse_values
             )
@@ -382,7 +385,9 @@ class LocalIndex(IIndex):
             converted_filters = self.field_type_converter.convert_filter_for_index(filters)
 
         # Execute uncached queries in parallel
-        def search_single(args: Tuple[int, List[float], Optional[List[str]], Optional[List[float]]]) -> Tuple[int, Tuple[List[int], List[float]]]:
+        def search_single(
+            args: Tuple[int, List[float], Optional[List[str]], Optional[List[float]]],
+        ) -> Tuple[int, Tuple[List[int], List[float]]]:
             idx, query_vector, sparse_terms, sparse_values = args
             if sparse_terms is None:
                 sparse_terms = []
@@ -396,19 +401,24 @@ class LocalIndex(IIndex):
         # Use thread pool for parallel execution
         with ThreadPoolExecutor(max_workers=min(num_threads, len(uncached_queries))) as executor:
             futures = [executor.submit(search_single, args) for args in uncached_queries]
-            
+
             for future in as_completed(futures):
                 try:
                     idx, result = future.result()
                     results[idx] = result
-                    
+
                     # Cache the result
                     query_vector = query_vectors[idx]
                     sparse_terms = sparse_raw_terms_list[idx]
                     sparse_values = sparse_values_list[idx]
                     self.query_cache.put(
-                        query_vector, limit, filters, sparse_terms, sparse_values,
-                        result[0], result[1]
+                        query_vector,
+                        limit,
+                        filters,
+                        sparse_terms,
+                        sparse_values,
+                        result[0],
+                        result[1],
                     )
                 except Exception as e:
                     logger.error(f"Batch search error for query: {e}")
@@ -426,7 +436,7 @@ class LocalIndex(IIndex):
 
     def invalidate_cache(self) -> None:
         """Invalidate the query cache for this index.
-        
+
         Should be called when the underlying data is modified.
         """
         self.query_cache.invalidate()
@@ -612,7 +622,7 @@ class VolatileIndex(LocalIndex):
         self.meta = meta
         self.field_type_converter = DataProcessor(self.meta.collection_meta.fields_dict)
         self.engine_proxy.add_data(self._convert_candidate_list_for_index(cands_list))
-        
+
         # Initialize query cache
         cache_config = cache_config or {}
         self.query_cache = QueryCache(

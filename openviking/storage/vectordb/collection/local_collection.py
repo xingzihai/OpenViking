@@ -113,7 +113,11 @@ def get_or_create_local_collection(
         )
         store_mgr = create_store_manager("local")
         collection = VolatileCollection(
-            meta=meta, store=store_mgr, vectorizer=vectorizer, config=config, cache_config=cache_config
+            meta=meta,
+            store=store_mgr,
+            vectorizer=vectorizer,
+            config=config,
+            cache_config=cache_config,
         )
         return Collection(collection)
     else:
@@ -128,7 +132,12 @@ def get_or_create_local_collection(
         storage_path = os.path.join(path, STORAGE_DIR_NAME)
         store_mgr = create_store_manager("local", storage_path)
         collection = PersistCollection(
-            path=path, meta=meta, store=store_mgr, vectorizer=vectorizer, config=config, cache_config=cache_config
+            path=path,
+            meta=meta,
+            store=store_mgr,
+            vectorizer=vectorizer,
+            config=config,
+            cache_config=cache_config,
         )
         return Collection(collection)
 
@@ -171,7 +180,7 @@ class LocalCollection(ICollection):
             executors={"default": {"type": "threadpool", "max_workers": 1}}
         )
         self.scheduler.start()
-        
+
         # Cache configuration for all indexes
         self.cache_config = cache_config or {}
 
@@ -405,7 +414,12 @@ class LocalCollection(ICollection):
         # Perform batch search with parallel processing
         actual_limit = limit + offset
         batch_results = index.batch_search(
-            dense_vectors, actual_limit, filters, sparse_raw_terms_list, sparse_values_list, num_threads
+            dense_vectors,
+            actual_limit,
+            filters,
+            sparse_raw_terms_list,
+            sparse_values_list,
+            num_threads,
         )
 
         # Process results for each query
@@ -528,7 +542,9 @@ class LocalCollection(ICollection):
             return SearchResult()
         cands = cands_list[0]
         sparse_vector = (
-            dict(zip(cands.sparse_raw_terms, cands.sparse_values)) if cands.sparse_raw_terms else {}
+            dict(zip(cands.sparse_raw_terms, cands.sparse_values, strict=True))
+            if cands.sparse_raw_terms
+            else {}
         )
 
         return self.search_by_vector(
@@ -777,7 +793,9 @@ class LocalCollection(ICollection):
             if not self.vectorizer_adapter:
                 raw_data[vk] = list(cand_data.vector)
                 if svk and cand_data.sparse_raw_terms and cand_data.sparse_values:
-                    raw_data[svk] = dict(zip(cand_data.sparse_raw_terms, cand_data.sparse_values))
+                    raw_data[svk] = dict(
+                        zip(cand_data.sparse_raw_terms, cand_data.sparse_values, strict=True)
+                    )
             raw_data = validation.fix_fields_data(raw_data, self.meta.fields_dict)
             raw_data_list.append(raw_data)
 

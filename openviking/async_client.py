@@ -15,30 +15,30 @@ preventing duplicate initialization.
 Example:
     >>> import asyncio
     >>> from openviking import AsyncOpenViking
-    >>> 
+    >>>
     >>> async def main():
     ...     # Create client (singleton)
     ...     client = AsyncOpenViking(path="./my_workspace")
     ...     await client.initialize()
-    ...     
+    ...
     ...     # Add a resource
     ...     result = await client.add_resource(
     ...         "https://github.com/example/repo",
     ...         wait=True,
     ...         reason="Project documentation"
     ...     )
-    ...     
+    ...
     ...     # Search for context
     ...     results = await client.find("what is the main feature?")
-    ...     
+    ...
     ...     # Create and manage a session
     ...     session = client.session()
     ...     await client.add_message(session.session_id, "user", "Hello!")
     ...     await client.commit_session(session.session_id)
-    ...     
+    ...
     ...     # Clean up
     ...     await client.close()
-    >>> 
+    >>>
     >>> asyncio.run(main())
 """
 
@@ -86,45 +86,45 @@ class AsyncOpenViking:
 
     Examples:
         Basic usage with initialization:
-        
+
         >>> from openviking import AsyncOpenViking
         >>> import asyncio
-        >>> 
+        >>>
         >>> async def main():
         ...     client = AsyncOpenViking(path="./my_workspace")
         ...     await client.initialize()
-        ...     
+        ...
         ...     # Add a resource and wait for processing
         ...     result = await client.add_resource(
         ...         "https://github.com/volcengine/OpenViking",
         ...         parent="viking://resources/",
         ...         wait=True
         ...     )
-        ...     
+        ...
         ...     # Search for context
         ...     results = await client.find("what is openviking")
         ...     print(results)
-        ...     
+        ...
         ...     await client.close()
-        >>> 
+        >>>
         >>> asyncio.run(main())
 
         Session-based conversation with memory extraction:
-        
+
         >>> async def chat_example():
         ...     client = AsyncOpenViking()
         ...     await client.initialize()
-        ...     
+        ...
         ...     # Create a session
         ...     session = client.session()
-        ...     
+        ...
         ...     # Add conversation messages
         ...     await client.add_message(session.session_id, "user", "I love Python!")
         ...     await client.add_message(session.session_id, "assistant", "Python is great!")
-        ...     
+        ...
         ...     # Commit session to extract memories
         ...     await client.commit_session(session.session_id)
-        ...     
+        ...
         ...     await client.close()
 
     See Also:
@@ -170,10 +170,10 @@ class AsyncOpenViking:
         Example:
             >>> # Use default configuration path
             >>> client = AsyncOpenViking()
-            >>> 
+            >>>
             >>> # Specify custom storage path
             >>> client = AsyncOpenViking(path="/data/openviking_workspace")
-            >>> 
+            >>>
             >>> # Initialize before use
             >>> await client.initialize()
 
@@ -321,10 +321,10 @@ class AsyncOpenViking:
             >>> # Create a new session with auto-generated ID
             >>> session = client.session()
             >>> print(session.session_id)  # e.g., "abc123..."
-            >>> 
+            >>>
             >>> # Create a session with a specific ID
             >>> session = client.session(session_id="my-session-001")
-            >>> 
+            >>>
             >>> # Load an existing session (raises error if not found)
             >>> session = client.session(session_id="existing-id", must_exist=True)
 
@@ -427,7 +427,7 @@ class AsyncOpenViking:
         Example:
             >>> # Get existing session (raises error if not found)
             >>> metadata = await client.get_session("session-123")
-            >>> 
+            >>>
             >>> # Get or create session
             >>> metadata = await client.get_session("session-123", auto_create=True)
         """
@@ -492,7 +492,7 @@ class AsyncOpenViking:
             ...     role="user",
             ...     content="What is OpenViking?"
             ... )
-            >>> 
+            >>>
             >>> # Structured message with parts
             >>> result = await client.add_message(
             ...     session_id="session-123",
@@ -555,7 +555,7 @@ class AsyncOpenViking:
             >>> # Add messages to session
             >>> await client.add_message(session_id, "user", "I prefer Python")
             >>> await client.add_message(session_id, "assistant", "Noted!")
-            >>> 
+            >>>
             >>> # Commit to extract memories
             >>> result = await client.commit_session(session_id)
             >>> print(f"Extracted {result['memories_extracted']['total']} memories")
@@ -653,7 +653,7 @@ class AsyncOpenViking:
             ...     "https://github.com/volcengine/OpenViking"
             ... )
             >>> print(f"Resource added at: {result['uri']}")
-            >>> 
+            >>>
             >>> # Add a local directory and wait for processing
             >>> result = await client.add_resource(
             ...     "/path/to/my/docs",
@@ -661,7 +661,7 @@ class AsyncOpenViking:
             ...     wait=True,
             ...     timeout=60
             ... )
-            >>> 
+            >>>
             >>> # Add with custom parsing options
             >>> result = await client.add_resource(
             ...     "/path/to/repo",
@@ -812,13 +812,13 @@ class AsyncOpenViking:
             >>> results = await client.search("how to use sessions?")
             >>> for result in results.results:
             ...     print(f"{result.uri}: {result.score}")
-            >>> 
+            >>>
             >>> # Search within a specific directory
             >>> results = await client.search(
             ...     query="API authentication",
             ...     target_uri="viking://resources/docs/api/"
             ... )
-            >>> 
+            >>>
             >>> # Context-aware search with session
             >>> session = client.session()
             >>> await client.add_message(session.session_id, "user", "I'm working on auth")
@@ -826,7 +826,7 @@ class AsyncOpenViking:
             ...     query="implementation details",
             ...     session=session
             ... )
-            >>> 
+            >>>
             >>> # Search with filters
             >>> results = await client.search(
             ...     query="error handling",
@@ -890,13 +890,13 @@ class AsyncOpenViking:
             >>> results = await client.find("machine learning")
             >>> for result in results.results:
             ...     print(f"{result.uri}: {result.score:.3f}")
-            >>> 
+            >>>
             >>> # Search in a specific directory
             >>> results = await client.find(
             ...     query="authentication",
             ...     target_uri="viking://resources/docs/"
             ... )
-            >>> 
+            >>>
             >>> # Search with score threshold
             >>> results = await client.find(
             ...     query="API reference",
@@ -1010,10 +1010,10 @@ class AsyncOpenViking:
             >>> # Read entire file
             >>> content = await client.read("viking://resources/docs/api.md")
             >>> print(content)
-            >>> 
+            >>>
             >>> # Read first 100 lines
             >>> content = await client.read("viking://resources/docs/api.md", limit=100)
-            >>> 
+            >>>
             >>> # Read from line 50 onwards
             >>> content = await client.read("viking://resources/docs/api.md", offset=50)
 
@@ -1062,10 +1062,10 @@ class AsyncOpenViking:
             >>> entries = await client.ls("viking://resources/")
             >>> for entry in entries:
             ...     print(f"{entry['name']}: {entry['type']}")
-            >>> 
+            >>>
             >>> # Recursive listing
             >>> entries = await client.ls("viking://resources/", recursive=True)
-            >>> 
+            >>>
             >>> # Simple path list
             >>> paths = await client.ls("viking://resources/", simple=True)
 
@@ -1109,7 +1109,7 @@ class AsyncOpenViking:
         Example:
             >>> # Remove a file
             >>> await client.rm("viking://resources/old_doc.md")
-            >>> 
+            >>>
             >>> # Remove a directory and all its contents
             >>> await client.rm("viking://resources/old_project/", recursive=True)
 
@@ -1150,7 +1150,7 @@ class AsyncOpenViking:
             >>> results = await client.grep("viking://resources/docs/", "error")
             >>> for match in results["matches"]:
             ...     print(f"{match['uri']}:{match['line_number']}: {match['line']}")
-            >>> 
+            >>>
             >>> # Case-insensitive search
             >>> results = await client.grep(
             ...     "viking://resources/",
@@ -1195,13 +1195,13 @@ class AsyncOpenViking:
             >>> results = await client.glob("**/*.py")
             >>> for uri in results["matches"]:
             ...     print(uri)
-            >>> 
+            >>>
             >>> # Find all markdown files in a specific directory
             >>> results = await client.glob(
             ...     "**/*.md",
             ...     uri="viking://resources/docs/"
             ... )
-            >>> 
+            >>>
             >>> # Find files matching a pattern
             >>> results = await client.glob("**/test_*.py")
 
@@ -1233,7 +1233,7 @@ class AsyncOpenViking:
             ...     "viking://resources/docs/old_name.md",
             ...     "viking://resources/docs/new_name.md"
             ... )
-            >>> 
+            >>>
             >>> # Move to a different directory
             >>> await client.mv(
             ...     "viking://resources/temp/file.md",
@@ -1277,7 +1277,7 @@ class AsyncOpenViking:
             >>> # Get tree of a resource directory
             >>> tree = await client.tree("viking://resources/my_project/")
             >>> print(tree)
-            >>> 
+            >>>
             >>> # Limit the tree depth
             >>> tree = await client.tree(
             ...     "viking://resources/",
@@ -1314,7 +1314,7 @@ class AsyncOpenViking:
         Example:
             >>> # Create a new directory
             >>> await client.mkdir("viking://resources/new_project/")
-            >>> 
+            >>>
             >>> # Create nested directories (if supported)
             >>> await client.mkdir("viking://resources/project/subdir/")
 
@@ -1412,7 +1412,7 @@ class AsyncOpenViking:
             ...     "viking://resources/docs/api.md",
             ...     reason="references"
             ... )
-            >>> 
+            >>>
             >>> # Create multiple relations
             >>> await client.link(
             ...     "viking://resources/project/",
@@ -1523,7 +1523,7 @@ class AsyncOpenViking:
             ...     "viking://resources/restored/"
             ... )
             >>> print(f"Imported to: {uri}")
-            >>> 
+            >>>
             >>> # Force import (overwrite existing)
             >>> uri = await client.import_ovpack(
             ...     "/backup/project.ovpack",

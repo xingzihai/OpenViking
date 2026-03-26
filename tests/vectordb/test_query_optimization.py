@@ -10,7 +10,7 @@ optimizations including:
 
 import random
 import time
-from typing import Dict, List
+from typing import Dict
 
 import pytest
 
@@ -40,12 +40,14 @@ def create_test_collection(
     categories = ["tech", "science", "art", "sports", "music"]
     data_list = []
     for i in range(num_docs):
-        data_list.append({
-            "id": i,
-            "embedding": [random.random() for _ in range(dim)],
-            "text": f"Document {i}",
-            "category": categories[i % 5],
-        })
+        data_list.append(
+            {
+                "id": i,
+                "embedding": [random.random() for _ in range(dim)],
+                "text": f"Document {i}",
+                "category": categories[i % 5],
+            }
+        )
 
     collection.upsert_data(data_list)
 
@@ -80,8 +82,8 @@ class TestQueryCache:
 
         # Perform searches
         query = [random.random() for _ in range(128)]
-        result1 = collection.search_by_vector("test_index", query, limit=5)
-        result2 = collection.search_by_vector("test_index", query, limit=5)
+        _result1 = collection.search_by_vector("test_index", query, limit=5)
+        _result2 = collection.search_by_vector("test_index", query, limit=5)
 
         # Cache should have 0 hits since it's disabled
         stats = collection.get_index_cache_stats("test_index")
@@ -106,7 +108,7 @@ class TestQueryCache:
         # Perform same search multiple times
         query = [random.random() for _ in range(128)]
         result1 = collection.search_by_vector("test_index", query, limit=5)
-        
+
         # Check cache miss
         stats = collection.get_index_cache_stats("test_index")
         assert stats["misses"] == 1
@@ -114,7 +116,7 @@ class TestQueryCache:
 
         # Same query should hit cache
         result2 = collection.search_by_vector("test_index", query, limit=5)
-        
+
         stats = collection.get_index_cache_stats("test_index")
         assert stats["hits"] == 1
 
@@ -135,23 +137,27 @@ class TestQueryCache:
 
         # Perform search to populate cache
         query = [random.random() for _ in range(128)]
-        result1 = collection.search_by_vector("test_index", query, limit=5)
-        
+        _result1 = collection.search_by_vector("test_index", query, limit=5)
+
         stats = collection.get_index_cache_stats("test_index")
         assert stats["misses"] == 1
         assert stats["hits"] == 0
 
         # Insert new data - should invalidate cache
-        collection.upsert_data([{
-            "id": 10000,
-            "embedding": [random.random() for _ in range(128)],
-            "text": "New document",
-            "category": "tech",
-        }])
+        collection.upsert_data(
+            [
+                {
+                    "id": 10000,
+                    "embedding": [random.random() for _ in range(128)],
+                    "text": "New document",
+                    "category": "tech",
+                }
+            ]
+        )
 
         # Same query should miss cache (it was invalidated)
-        result2 = collection.search_by_vector("test_index", query, limit=5)
-        
+        _result2 = collection.search_by_vector("test_index", query, limit=5)
+
         stats = collection.get_index_cache_stats("test_index")
         # After upsert, cache was invalidated, so another miss
         assert stats["misses"] == 2
@@ -167,11 +173,11 @@ class TestQueryCache:
 
         # Perform multiple searches
         queries = [[random.random() for _ in range(128)] for _ in range(5)]
-        
+
         # First round - all misses
         for query in queries:
             collection.search_by_vector("test_index", query, limit=5)
-        
+
         stats = collection.get_index_cache_stats("test_index")
         assert stats["misses"] == 5
         assert stats["hits"] == 0
@@ -179,7 +185,7 @@ class TestQueryCache:
         # Second round - all hits (same queries)
         for query in queries:
             collection.search_by_vector("test_index", query, limit=5)
-        
+
         stats = collection.get_index_cache_stats("test_index")
         assert stats["hits"] == 5
 
@@ -202,7 +208,7 @@ class TestBatchSearch:
         # Perform batch search
         num_queries = 10
         queries = [[random.random() for _ in range(128)] for _ in range(num_queries)]
-        
+
         results = collection.batch_search_by_vector(
             index_name="test_index",
             dense_vectors=queries,
@@ -227,7 +233,7 @@ class TestBatchSearch:
 
         num_queries = 5
         queries = [[random.random() for _ in range(128)] for _ in range(num_queries)]
-        
+
         results = collection.batch_search_by_vector(
             index_name="test_index",
             dense_vectors=queries,
@@ -252,7 +258,7 @@ class TestBatchSearch:
         num_queries = 3
         queries = [[random.random() for _ in range(128)] for _ in range(num_queries)]
         sparse_vectors = [{"term1": 0.5, "term2": 0.3} for _ in range(num_queries)]
-        
+
         results = collection.batch_search_by_vector(
             index_name="test_index",
             dense_vectors=queries,
@@ -272,7 +278,7 @@ class TestBatchSearch:
         )
 
         queries = [[random.random() for _ in range(128)] for _ in range(3)]
-        
+
         # Search with offset=0
         results_no_offset = collection.batch_search_by_vector(
             index_name="test_index",
@@ -365,7 +371,7 @@ class TestPerformanceBenchmark:
 
         # Get stats
         stats = collection.get_index_cache_stats("test_index")
-        print(f"\nCache Performance:")
+        print("\nCache Performance:")
         print(f"  Total queries: {len(repeated_queries)}")
         print(f"  Cache hits: {stats['hits']}")
         print(f"  Cache misses: {stats['misses']}")
@@ -405,7 +411,7 @@ class TestPerformanceBenchmark:
         )
         batch_time = time.time() - start_time
 
-        print(f"\nBatch Search Performance:")
+        print("\nBatch Search Performance:")
         print(f"  Number of queries: {num_queries}")
         print(f"  Individual search time: {individual_time:.3f}s")
         print(f"  Batch search time: {batch_time:.3f}s")
